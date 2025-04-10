@@ -126,23 +126,30 @@ Data is extracted via SQL queries using a suitable Python connector, SQLAlchemy.
 
 AID-RL/
 ├── data/
-│   └── db_connection.py - Module for connecting to MySQL and fetching data
-├── env/
-│   └── volunteer_env.py - Custom Gym environment for monthly assignment cycles
+│   └── db_config.py           # MySQL connection configuration using SQLAlchemy
+│
 ├── models/
-│   └── actor_critic.py - Actor-Critic model architecture
-├── trainers/
-│   └── train_agent.py - RL training loop for the Actor-Critic algorithm
-├── evaluators/
-│   └── evaluate_agent.py - Evaluation and performance tracking scripts
-├── utils/
-│   ├── feature_engineering.py - Clustering (DBSCAN), distance computation, data preprocessing
-│   └── reward_utils.py - Implementation of the reward function
-├── interface/
-│   └── admin_review.py - Admin interface module for feedback and corrections
-├── main.py - Entry-point to run the complete system
-├── requirements.txt - List of Python dependencies
-└── README.md - This file
+│   ├── actor.py               # Defines the policy network (Actor)
+│   ├── critic.py              # Defines the value estimator (Critic)
+│   └── rl_agent.py            # The Actor-Critic agent class
+│
+├── clustering/
+│   └── dbscan_cluster.py      # DBSCAN-based recipient clustering
+│
+├── env/
+│   └── delivery_env.py        # Custom RL environment for volunteer-recipient assignment
+│
+├── training/
+│   └── train_agent.py         # Training loop for RL agent
+│
+├── feedback/
+│   └── feedback_handler.py    # Collects and processes admin feedback
+│
+├── assignment/
+│   └── assign_volunteers.py   # Outputs optimal volunteer-to-recipient assignments
+│
+└── README.md                  # Project overview
+
 
 ---
 
