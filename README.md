@@ -1,175 +1,175 @@
-# AID-RL
-Assigning volunteers to recipients for delivery automatically using Reinforcement Learning algorithms.
+# 📦 Volunteer Assignment Optimization with Reinforcement Learning
 
-# Volunteer Assignment Optimization with Reinforcement Learning
+## Project Description
 
-## 📦 Project Description
+This project automates and optimizes the monthly assignment of **volunteers** to **recipients** for box deliveries. Each recipient may require multiple boxes, and each volunteer has a limited car capacity. The goal is to build an AI system that learns from past assignments and intelligently handles future ones based on:
 
-This project aims to automate and optimize the assignment of **volunteers** to **recipients** for monthly box deliveries. The main goal is to build an intelligent agent that learns how to assign the right volunteers to the right recipients while considering a variety of practical constraints such as location, vehicle capacity, and historical preferences.
+- Location proximity
+- Vehicle capacity
+- Historical volunteer-recipient relationships
+- Efficient area grouping
+- Admin feedback on assignment quality
 
-The AI system should:
-- Learn from historical assignment data
-- Minimize travel distance
-- Maximize car capacity usage
-- Prioritize known volunteer-recipient pairings
-- Adapt to changing volunteer availability and recipient demands
-- Allow admin review and correction (used as feedback to learn better)
+The goal is to reduce the time and complexity involved in manual assignments, while maintaining high-quality, human-level decision-making.
 
 ---
 
-## 🧠 Problem Type
+## 🔍 Problem Type
 
-This is a **Reinforcement Learning (RL)** problem, modeled as a **Markov Decision Process (MDP)**.
-
-- **Type:** Episodic (each monthly assignment cycle is an episode)
-- **Goal:** Maximize efficiency and quality of volunteer-recipient assignments over each episode
+- **Type:** Reinforcement Learning (RL)
+- **Model:** Markov Decision Process (MDP)
+- **Episode:** One month of assignments
+- **Goal:** Maximize efficiency of assignments across each episode
 
 ---
 
 ## 🧩 MDP Components
 
-### ✅ States
+### ✅ State (S)
 
-A state encodes the current decision context, including:
+Each state represents a snapshot of the delivery task:
 
-- Volunteer info:
-  - Volunteer ID
-  - Zip code (convertible to coordinates)
-  - Car capacity (in box count)
-  - History of previous recipient assignments
-- Recipient info:
-  - Recipient ID
-  - Coordinates (lat/lon)
-  - Number of boxes required
-- Clustering info:
-  - Cluster/group ID (if recipients are geographically clustered)
-  - Number of unassigned recipients in this cluster
-- Dynamic episode context:
-  - Number of remaining recipients
-  - Remaining volunteers
+- Remaining recipients (IDs, coords, box count)
+- Available volunteers (ID, zip code, car capacity)
+- Past assignment preference (volunteer-recipient history)
+- Recipient clusters (grouped geographically)
+- Unassigned recipient count per cluster
+- Volunteer capacity used so far
 
-### 🎯 Actions
+### 🎯 Action (A)
 
-An action represents assigning a **volunteer to a recipient or group of recipients** (depending on the clustering approach).
+Assign a volunteer to one or more recipients from a cluster:
 
-- Option 1: Assign Volunteer X to Recipient Y
-- Option 2: Assign Volunteer X to Recipient Group (cluster)
+- `assign(volunteer_id, recipient_id or recipient_group)`
 
-### 💰 Rewards
+### 💰 Reward (R)
 
-The reward function should guide the AI towards efficient, realistic assignments. Suggested reward components:
+| Scenario | Reward |
+|---------|--------|
+| Volunteer previously served the recipient | +3 |
+| Short travel distance (within cluster) | +2 |
+| Car capacity matches box count well | +2 |
+| Wasted capacity (unused box space) | -1 |
+| Assignment exceeds car size | -3 |
+| Recipients in same area poorly split | -2 |
+| Admin override/rejection | -5 |
 
-| Condition | Reward |
-|----------|--------|
-| Volunteer previously delivered to recipient | +3 |
-| Volunteer and recipient are close (short travel distance) | +2 |
-| Car capacity closely matches number of boxes | +2 |
-| Assignment wastes capacity (e.g., car size 16 for 5 boxes) | -1 |
-| Assignment exceeds car capacity | -3 |
-| Recipients in same area not grouped well | -2 |
-| Admin rejects assignment | -5 (simulated feedback) |
+### 🔁 Episode
 
-Rewards can be scaled and tuned.
-
-### 🔁 Episodes
-
-Each **monthly assignment cycle** is one episode. The agent should assign all recipients to available volunteers by the end of the episode.
+One monthly assignment cycle = one full episode. Agent must complete all assignments.
 
 ---
 
-## 📚 Available Data
+## 📚 Data Source
 
-The following data is available for training and evaluation:
-
-- `volunteers.csv`:
-  - `volunteer_id`
-  - `zip_code`
-  - `car_capacity`
-- `recipients.csv`:
-  - `recipient_id`
-  - `latitude`
-  - `longitude`
-  - `box_count`
-- `assignment_history.csv`:
-  - `volunteer_id`
-  - `recipient_id`
-  - `timestamp` (past 2 months)
-- Additional data can be generated using clustering algorithms (e.g., KMeans, DBSCAN) for recipient grouping
+- All data is stored in a **MySQL database** via **phpMyAdmin**
+- Tables include:
+  - `volunteers`: volunteer_id, zip_code, car_capacity
+  - `recipients`: recipient_id, latitude, longitude, box_count
+  - `assignments`: volunteer_id, recipient_id, timestamp
+- Data is accessed and preprocessed using SQL queries
 
 ---
 
 ## 🧪 Implementation Plan
 
-1. **Feature Engineering**
-   - Convert zip codes to coordinates
-   - Compute distances between volunteers and recipients
-   - Calculate cluster membership
-   - Create match history features
+1. **Data Ingestion**
+   - Connect to MySQL using SQLAlchemy or PyMySQL
+   - Extract, clean, and convert data into appropriate format
 
-2. **Modeling as RL**
-   - Define states, actions, rewards, episodes
-   - Optionally simulate the environment to train the agent
+2. **Feature Engineering**
+   - Convert zip codes to lat/lon coordinates
+   - Calculate distance matrix
+   - Cluster recipients (e.g., using DBSCAN or KMeans)
+   - Extract past volunteer-recipient preferences
 
-3. **Algorithm**
-   - Start with **Actor-Critic** or **DQN** (Deep Q-Network)
-   - Use function approximation (neural networks) for state-action value or policy
-   - Optionally add a **model-based component** (Dyna) for faster learning
+3. **Environment Modeling**
+   - Implement custom Gym-like environment
+   - Define state transitions and reward structure
 
-4. **Training & Evaluation**
-   - Use historical data to train (offline)
-   - Run simulated episodes for testing
-   - Evaluate reward scores, efficiency of assignments
-   - Incorporate admin feedback for fine-tuning
+4. **Model Selection**
+   - Use **Actor-Critic** or **DQN** with neural networks
+   - Use function approximation to handle large state space
+
+5. **Training**
+   - Train using historical assignment data and simulated environment
+   - Include admin feedback as part of reward shaping
+
+6. **Deployment**
+   - Expose model via API
+   - Admin can trigger, inspect, and modify auto-assignments
 
 ---
 
-## 🛠️ Technologies
+## 🛠️ Technology Stack
 
-- Python
-- PyTorch or TensorFlow
-- Pandas, NumPy
-- Scikit-learn (for clustering)
-- OpenAI Gym (for environment simulation)
-- Matplotlib / Plotly (for visualizing assignments and rewards)
+- **Language:** Python
+- **Database:** MySQL (access via phpMyAdmin)
+- **AI Frameworks:** PyTorch or TensorFlow
+- **Visualization:** Matplotlib / Plotly
+- **Environment Simulation:** OpenAI Gym (custom)
+- **Data Science Tools:** Pandas, NumPy, scikit-learn
+- **Web/API (optional):** FastAPI or Flask
+
+---
+
+## 📂 Project Structure
+
+AID-RL/
+├── data/
+│   └── db_connection.py        # Connects and fetches data from MySQL
+├── env/
+│   └── volunteer_env.py        # Custom Gym environment definition
+├── models/
+│   └── actor_critic.py         # Actor-Critic model architecture
+├── trainers/
+│   └── train_agent.py          # RL training loop
+├── evaluators/
+│   └── evaluate_agent.py       # Evaluation and performance tracking
+├── utils/
+│   ├── feature_engineering.py  # Clustering, distance, preprocessing
+│   └── reward_utils.py         # Reward shaping and scoring logic
+├── interface/
+│   └── admin_review.py         # Admin feedback loop for corrections
+├── main.py                     # Run complete system
+├── requirements.txt            # Python dependencies
+└── README.md                   # This file
 
 ---
 
 ## ✅ Goals
 
-- Build a system that performs or assists with volunteer-recipient assignment
-- Minimize admin manual work
-- Handle scale, changes in volunteer pool, and real-world constraints
-- Learn from both data and feedback
+- Automate volunteer-to-recipient assignments
+- Learn from historical data and admin feedback
+- Minimize inefficiency in distance and car usage
+- Handle changing volunteer and recipient pools
+- Provide admin oversight and control
 
 ---
 
-## 🤝 Admin Feedback
+## ✨ Future Features
 
-Admin review is crucial. The system should:
-- Allow manual override of assignments
-- Use rejected assignments as **negative examples**
-- Learn from corrections (e.g., through reward shaping or imitation learning)
-
----
-
-## 📂 File Structure (suggested)
-
-project/ │ ├── data/ │ ├── volunteers.csv │ ├── recipients.csv │ └── assignment_history.csv │ ├── env/ │ └── volunteer_env.py # Custom Gym environment │ ├── models/ │ └── actor_critic.py # RL model │ ├── utils/ │ └── feature_engineering.py # Zip code to coords, clustering, etc. │ ├── train.py # Training loop ├── evaluate.py # Evaluation scripts └── README.md
+- Admin interface with real-time assignment override
+- Traffic-based route optimization
+- Recipient delivery window preferences
+- Fairness tracking (how often each volunteer is used)
+- Multi-city scaling
 
 ---
 
-## ✨ Future Improvements
+## 🧠 How to Contribute
 
-- Add preference learning (if volunteers prefer certain recipients or neighborhoods)
-- Add traffic/time constraints for delivery windows
-- Add transfer learning if the problem expands to other cities or months
-- Explore federated learning if privacy is a concern
+You can assist with:
+- Data cleaning and clustering logic
+- Gym environment modeling
+- Reinforcement learning training loop
+- Web dashboard for admin interface
+
+Start by checking `main.py` or the environment setup in `env/volunteer_env.py`.
 
 ---
 
 ## 📬 Contact
 
-For questions, improvements, or collaboration, please reach out!
-
-
+For any questions or collaborations, reach out via this repo or project lead.
 
