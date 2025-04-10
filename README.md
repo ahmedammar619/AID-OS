@@ -157,18 +157,6 @@ AID-RL/
 
 ---
 
-## 🧠 How to Contribute
-
-You can assist with:
-- Data cleaning and clustering logic
-- Gym environment modeling
-- Reinforcement learning training loop
-- Web dashboard for admin interface
-
-Start by checking `main.py` or the environment setup in `env/volunteer_env.py`.
-
----
-
 ## 📬 Contact
 
 For any questions or collaborations, reach out via this repo or project lead.
