@@ -68,9 +68,9 @@ An episode is defined as one complete monthly assignment cycle. The episode ends
 ## Data Source
 
 All data is stored in a **MySQL** database accessed via phpMyAdmin. The key tables are:
-- `volunteers`: Contains `volunteer_id`, `zip_code`, `car_capacity`
-- `recipients`: Contains `recipient_id`, `latitude`, `longitude`, `box_count`
-- `assignment_history`: Contains `volunteer_id`, `recipient_id`, `timestamp` (historical data for the past two months)
+- `volunteer`: Contains `volunteer_id`, `zip_code`, `car_size`
+- `recipient`: Contains `recipient_id`, `latitude`, `longitude`, `num_items`
+- `delivery_archive`: Contains `volunteer_id`, `recipient_id`, `timestamp` (historical data for the past two months)
 
 Data is extracted via SQL queries using a suitable Python connector, SQLAlchemy.
 
