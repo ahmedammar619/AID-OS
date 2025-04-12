@@ -127,7 +127,7 @@ class DatabaseHandler:
         """Retrieve all recipients from the database."""
         session = self.Session()
         recipients = session.query(Recipient).filter(
-            Recipient.replied == 'Yes',
+            # Recipient.replied == 'Yes',
             Recipient.distributor_id == None
         ).all()
         session.close()
@@ -213,7 +213,12 @@ def show(array, limit=5):
 if __name__ == "__main__":
     db = DatabaseHandler()
     # db.create_tables()
-    volunteers = db.get_all_volunteers()
-    show(volunteers)
-    count(volunteers)
+    recipients = db.get_all_recipients()
+    show(recipients)
+    count(recipients)
+    #draw the coords of the recipients on a graph and show the id of the point on hover
+    import matplotlib.pyplot as plt
+    plt.scatter([r.longitude for r in recipients], [r.latitude for r in recipients])
+    plt.show()
+
     # print("Database tables created successfully!")
