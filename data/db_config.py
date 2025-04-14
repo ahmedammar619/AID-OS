@@ -110,9 +110,9 @@ class DatabaseHandler:
         db_url = f"mysql+pymysql://{self.config['username']}:{self.config['password']}@{self.config['host']}/{self.config['database']}"
         return create_engine(db_url)
     
-    # def create_tables(self):
-    #     """Create all tables defined in the Base metadata."""
-    #     Base.metadata.create_all(self.engine)
+    def create_tables(self):
+        """Create all tables defined in the Base metadata."""
+        Base.metadata.create_all(self.engine)
     
     def get_all_volunteers(self):
         """Retrieve all volunteers from the database."""
