@@ -6,12 +6,12 @@ DBSCAN-based recipient clustering for the AID-RL project.
 Clusters recipients based on their geographic coordinates.
 """
 
+# import pandas as pd
+# from sklearn.preprocessing import StandardScaler
+# from geopy.distance import geodesic
 import numpy as np
-import pandas as pd
 import hdbscan
-from sklearn.preprocessing import StandardScaler
 import folium
-from geopy.distance import geodesic
 import math
 import webbrowser
 import os

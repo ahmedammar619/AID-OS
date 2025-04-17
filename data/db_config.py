@@ -53,7 +53,7 @@ class Recipient(Base):
         return f"<Recipient(recipient_id={self.recipient_id}, location=({self.latitude}, {self.longitude}), num_items={self.num_items})>"
 
 class Delivery(Base):
-    __tablename__ = 'delivery'
+    __tablename__ = 'deliveryTest'
     
     delivery_id = Column(Integer, primary_key=True, autoincrement=True)
     volunteer_id = Column(Integer, ForeignKey('volunteer.volunteer_id'))
@@ -120,6 +120,14 @@ class DatabaseHandler:
         volunteers = session.query(Volunteer).filter(
             (Volunteer.replied == 'Delivery') | (Volunteer.replied == 'Both')
         ).all()
+
+        # Ensure car_size is converted to an integer
+        for volunteer in volunteers:
+            try:
+                volunteer.car_size = int(volunteer.car_size)
+            except ValueError:
+                volunteer.car_size = 0.001  # Handle invalid cases
+
         session.close()
         return volunteers
     
