@@ -8,7 +8,7 @@ Clusters recipients based on their geographic coordinates.
 
 import numpy as np
 import pandas as pd
-from sklearn.cluster import DBSCAN
+import hdbscan
 from sklearn.preprocessing import StandardScaler
 import folium
 from geopy.distance import geodesic
@@ -21,25 +21,26 @@ from pathlib import Path
 class RecipientClusterer:
     """
     Class for clustering recipients based on their geographic coordinates
-    using the DBSCAN algorithm.
+    using the HDBSCAN algorithm.
     """
     
-    def __init__(self, eps=0.3, min_samples=3):
+    def __init__(self, min_cluster_size=5, min_samples=None, cluster_selection_epsilon=0.5):
         """
-        Initialize the clusterer with DBSCAN parameters.
+        Initialize the HDBSCAN clusterer.
         
         Args:
-            eps (float): The maximum distance between two samples for one to be 
-                        considered as in the neighborhood of the other (in km).
-            min_samples (int): The minimum number of samples in a neighborhood 
-                              for a point to be considered as a core point.
+            min_cluster_size (int): Minimum size of clusters
+            min_samples (int): Number of samples in a neighborhood
+            cluster_selection_epsilon (float): Distance threshold for cluster selection
         """
-        self.eps = eps
-        self.min_samples = min_samples
-        self.dbscan = DBSCAN(eps=eps/6371., min_samples=min_samples, metric='haversine')
-        self.scaler = StandardScaler()
+        self.clusterer = hdbscan.HDBSCAN(
+            min_cluster_size=min_cluster_size,
+            min_samples=min_samples,
+            cluster_selection_epsilon=cluster_selection_epsilon,
+            metric='haversine'
+        )
         self.fitted = False
-        self.clusters = None
+        self.cluster_labels = None
         self.cluster_centers = None
         
     def _haversine_distance(self, lat1, lon1, lat2, lon2):
@@ -94,7 +95,7 @@ class RecipientClusterer:
     
     def fit(self, coordinates):
         """
-        Fit the DBSCAN clustering algorithm to the recipient coordinates.
+        Fit the HDBSCAN clustering algorithm to the recipient coordinates.
         
         Args:
             coordinates (numpy.ndarray): Array of (latitude, longitude) pairs
@@ -102,22 +103,18 @@ class RecipientClusterer:
         Returns:
             cluster_labels (numpy.ndarray): Cluster labels for each recipient
         """
-        # Convert latitude and longitude to radians for Haversine distance
+        # Convert coordinates to radians for Haversine distance
         coordinates_rad = np.radians(coordinates)
         
-        # Fit DBSCAN
-        self.dbscan.fit(coordinates_rad)
-        
-        # Store cluster labels
-        self.cluster_labels = self.dbscan.labels_
+        # Fit HDBSCAN
+        self.cluster_labels = self.clusterer.fit_predict(coordinates_rad)
+        self.fitted = True
         
         # Calculate cluster centers
         self._calculate_cluster_centers(coordinates)
-
+        
         # Calculate cluster counts
         self.cluster_counts = {label: np.sum(self.cluster_labels == label) for label in np.unique(self.cluster_labels)}
-        
-        self.fitted = True
         
         return self.cluster_labels
     
@@ -129,7 +126,7 @@ class RecipientClusterer:
             coordinates (numpy.ndarray): Array of (latitude, longitude) pairs
         """
         if not hasattr(self, 'cluster_labels'):
-            raise ValueError("DBSCAN must be fitted before calculating cluster centers")
+            raise ValueError("HDBSCAN must be fitted before calculating cluster centers")
         
         # Get unique cluster labels (excluding noise points with label -1)
         unique_labels = np.unique(self.cluster_labels)
@@ -160,7 +157,7 @@ class RecipientClusterer:
             dict: Dictionary with cluster information
         """
         if not self.fitted:
-            raise ValueError("DBSCAN must be fitted before getting clusters")
+            raise ValueError("HDBSCAN must be fitted before getting clusters")
         
         # Count number of elements in each cluster
         cluster_counts = {}
@@ -191,7 +188,7 @@ class RecipientClusterer:
             save_path (str, optional): Path to save the HTML map
         """
         if not self.fitted:
-            raise ValueError("DBSCAN must be fitted before visualization")
+            raise ValueError("HDBSCAN must be fitted before visualization")
             
         # Create a base map centered on the mean of all points
         mean_lat = np.mean(coordinates[:, 0])
@@ -300,6 +297,27 @@ class RecipientClusterer:
                 else:
                     popup = f'Cluster {label} Center'
                 
+                # Calculate actual cluster radius (max distance from center)
+                cluster_points = coordinates[self.cluster_labels == label]
+                if len(cluster_points) > 0:
+                    distances = [self._haversine_distance(center[0], center[1], pt[0], pt[1]) 
+                                for pt in cluster_points]
+                    cluster_radius = max(distances) * 1000  # Convert km to meters
+                else:
+                    cluster_radius = self.clusterer.cluster_selection_epsilon * 1000
+                
+                # Draw adaptive circle around cluster
+                folium.Circle(
+                    location=center,
+                    radius=cluster_radius,
+                    color=colors[label % len(colors)],
+                    fill=True,
+                    fill_opacity=0.15,
+                    weight=1,
+                    fill_color=colors[label % len(colors)],
+                    tooltip=f'Cluster {label} radius: {cluster_radius/1000:.2f}km'
+                ).add_to(m)
+                
                 # Add marker for cluster center with recipient count
                 recipient_count = len(cluster_groups.get(label, [])) if label in cluster_groups else 0
                 folium.Marker(
@@ -327,15 +345,6 @@ class RecipientClusterer:
                     ),
                     tooltip=f'Cluster {label}: {recipient_count} recipients',
                     popup=popup
-                ).add_to(m)
-                
-                # Draw a circle around the cluster with radius = eps
-                folium.Circle(
-                    location=center,
-                    radius=self.eps * 1000,  # Convert km to meters
-                    color=colors[label % len(colors)],
-                    fill=True,
-                    fill_opacity=0.2
                 ).add_to(m)
         
         # Add volunteers if provided

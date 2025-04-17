@@ -14,8 +14,8 @@ from collections import deque
 import random
 import os
 
-from actor import Actor
-from critic import Critic
+from models.actor import Actor
+from models.critic import Critic
 
 
 class ActorCriticAgent:

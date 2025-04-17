@@ -32,7 +32,11 @@ def main():
     # Combine into a list of tuples
     volunteer_coords = np.array(list(zip(latitudes, longitudes)))
     # Initialize and fit the clusterer
-    clusterer = RecipientClusterer(eps=2, min_samples=3)
+    clusterer = RecipientClusterer(
+        min_cluster_size=2,
+        cluster_selection_epsilon=0.00005,
+        min_samples=1
+    )
     labels = clusterer.fit(all_coords)
     
     # Visualize the clusters
