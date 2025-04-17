@@ -7,7 +7,7 @@ This project automates and optimizes the monthly assignment of volunteers to rec
 - Location proximity
 - Vehicle capacity matching
 - Historical volunteer–recipient pair preferences
-- Efficient grouping of nearby recipients using clustering (DBSCAN)
+- Efficient grouping of nearby recipients using clustering (HDBSCAN)
 - Admin feedback on assignment quality
 
 The system produces a final, optimized assignment of all recipients to volunteers once a month, with the option to run a second time after admin review.
@@ -39,7 +39,7 @@ Each state is represented by a feature vector that includes:
 
 - **Contextual Information:**  
   - Current pool of unassigned recipients  
-  - Cluster information for recipients (derived from DBSCAN clustering)  
+  - Cluster information for recipients (derived from HDBSCAN clustering)  
   - Counts of recipients within each cluster  
   - Any additional admin or preference signals
 
@@ -82,7 +82,7 @@ Data is extracted via SQL queries using a suitable Python connector, SQLAlchemy.
    - Connect to MySQL to fetch data
    - Convert volunteer zip codes to coordinates
    - Compute travel distances between volunteers and recipients (e.g., using the Haversine formula)
-   - Cluster recipients using **DBSCAN** (to capture natural geographic groupings)
+   - Cluster recipients using **HDBSCAN** (to capture natural geographic groupings)
    - Generate additional features from historical assignment data
 
 2. **MDP and Environment Design**  
@@ -115,7 +115,7 @@ Data is extracted via SQL queries using a suitable Python connector, SQLAlchemy.
 - **RL Framework:** Custom implementation using PyTorch
 - **Environment Simulation:** Custom Gym environment
 - **Data Processing:** Pandas, NumPy
-- **Clustering:** Scikit-learn (using DBSCAN)
+- **Clustering:** Scikit-learn (using HDBSCAN)
 - **Visualization:** Matplotlib, Plotly
 
 ---
@@ -123,7 +123,7 @@ Data is extracted via SQL queries using a suitable Python connector, SQLAlchemy.
 ## Project Structure
 
 
-
+```bash
 AID-RL/
 ├── data/
 │   └── db_config.py           # MySQL connection configuration using SQLAlchemy
@@ -149,7 +149,7 @@ AID-RL/
 │   └── assign_volunteers.py   # Outputs optimal volunteer-to-recipient assignments
 │
 └── README.md                  # Project overview
-
+```
 
 ---
 
