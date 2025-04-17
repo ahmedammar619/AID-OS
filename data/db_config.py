@@ -28,8 +28,10 @@ class Volunteer(Base):
     longitude = Column(Float, nullable=True)
     latitude = Column(Float, nullable=True)
     replied = Column(String, nullable=False, default='No response')
+    pickup_id = Column(Integer, ForeignKey('collect_location.location_id'))
     
-    # Relationship with delivery archive
+    # Relationships
+    pickup = relationship("Pickup", back_populates="volunteers")
     deliveries = relationship("Delivery", back_populates="volunteer")
     archived_deliveries = relationship("DeliveryArchive", back_populates="volunteer")
     
@@ -53,6 +55,21 @@ class Recipient(Base):
     
     def __repr__(self):
         return f"<Recipient(recipient_id={self.recipient_id}, location=({self.latitude}, {self.longitude}), num_items={self.num_items})>"
+
+class Pickup(Base):
+    __tablename__ = 'collect_location'
+    
+    location_id = Column(Integer, primary_key=True, autoincrement=True)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    num_items = Column(Integer)
+    active = Column(Integer, nullable=False, default=1)
+    
+    # Relationship with volunteers
+    volunteers = relationship("Volunteer", back_populates="pickup")
+    
+    def __repr__(self):
+        return f"<Pickup(location_id={self.location_id}, location=({self.latitude}, {self.longitude}), num_items={self.num_items})>"
 
 class Delivery(Base):
     __tablename__ = 'deliveryTest'
@@ -218,6 +235,15 @@ class DatabaseHandler:
         ).all()
         session.close()
         return recipients
+    
+    def get_all_pickups(self):
+        """Retrieve all pickup locations from the database."""
+        session = self.Session()
+        pickups = session.query(Pickup).filter(
+            Pickup.active == 1  # Using 1 instead of True for MySQL
+        ).all()
+        session.close()
+        return pickups
 
 
     def get_historical_deliveries(self):
@@ -299,9 +325,12 @@ def show(array, limit=5):
 if __name__ == "__main__":
     db = DatabaseHandler()
     # db.create_tables()
-    Volunteers = db.get_all_volunteers()
-    show(Volunteers)
-    count(Volunteers)
+    # Volunteers = db.get_all_volunteers()
+    # show(Volunteers)
+    # count(Volunteers)
+    pickups = db.get_all_pickups()
+    show(pickups)
+    count(pickups)
     #draw the coords of the recipients on a graph and show the id of the point on hover
     # import matplotlib.pyplot as plt
     # plt.scatter([r.longitude for r in recipients], [r.latitude for r in recipients])
