@@ -83,9 +83,13 @@ class DeliveryEnv(gym.Env):
         self.recipients = self.db_handler.get_all_recipients()
         self.num_recipients = len(self.recipients)
         
+        # Get pickups
+        self.pickups = self.db_handler.get_all_pickups()
+        self.num_pickups = len(self.pickups)
+
         # Get historical delivery data
         self.historical_data = self.db_handler.get_historical_deliveries()
-        
+
         # Extract coordinates for clustering
         self.volunteer_coords = np.array([[v.latitude, v.longitude] 
                                          for v in self.volunteers])

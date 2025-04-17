@@ -176,7 +176,7 @@ class RecipientClusterer:
         
         return clusters
     
-    def visualize_clusters(self, coordinates, recipient_ids=None, recipient_boxes=None, volunteer_coords=None, save_path=None):
+    def visualize_clusters(self, coordinates, recipient_ids=None, recipient_boxes=None, volunteer_coords=None, save_path=None, pickup_coords=None):
         """
         Visualize the clustering results on an interactive Leaflet map.
         
@@ -186,6 +186,7 @@ class RecipientClusterer:
             recipient_boxes (list, optional): Number of boxes for each recipient
             volunteer_coords (numpy.ndarray, optional): Volunteer coordinates to plot
             save_path (str, optional): Path to save the HTML map
+            pickup_coords (numpy.ndarray, optional): Pickup coordinates to plot
         """
         if not self.fitted:
             raise ValueError("HDBSCAN must be fitted before visualization")
@@ -355,6 +356,16 @@ class RecipientClusterer:
                     icon=folium.Icon(color='red', icon='user', prefix='fa'),
                     tooltip=f'Volunteer {i+1}',
                     popup=f'Volunteer {i+1}'
+                ).add_to(m)
+        
+        # Add pickups if provided
+        if pickup_coords is not None:
+            for i, (lat, lon) in enumerate(pickup_coords):
+                folium.Marker(
+                    location=[lat, lon],
+                    icon=folium.Icon(color='green', icon='home', prefix='fa'),
+                    tooltip=f'Pickup {i+1}',
+                    popup=f'Pickup {i+1}'
                 ).add_to(m)
         
         # Add layer control

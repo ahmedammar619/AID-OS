@@ -38,6 +38,10 @@ def main():
         min_samples=1
     )
     labels = clusterer.fit(all_coords)
+
+    # Get pickups
+    pickups = db.get_all_pickups()
+    pickup_coords = np.array([[p.latitude, p.longitude] for p in pickups])
     
     # Visualize the clusters
     output_path = os.path.join("./output", "cluster_map.html")
@@ -46,7 +50,8 @@ def main():
         all_ids, 
         recipient_boxes,
         volunteer_coords,
-        save_path=output_path
+        save_path=output_path,
+        pickup_coords=pickup_coords
     )
 
     
