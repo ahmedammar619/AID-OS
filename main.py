@@ -2,6 +2,7 @@ from data.db_config import DatabaseHandler, Volunteer
 # from models.rl_agent import ActorCriticAgent
 from clustering.dbscan_cluster import RecipientClusterer
 import numpy as np
+import os
 
 
 def main():
@@ -18,6 +19,7 @@ def main():
     
     # Create recipient IDs
     all_ids = [r.recipient_id for r in recipients]
+    recipient_boxes = [r.num_items for r in recipients]
     
     # Get volunteer coordinates
     # volunteers = db.get_all_volunteers()
@@ -29,13 +31,19 @@ def main():
 
     # Combine into a list of tuples
     volunteer_coords = np.array(list(zip(latitudes, longitudes)))
-    
     # Initialize and fit the clusterer
-    clusterer = RecipientClusterer(eps=0.0005, min_samples=3)
+    clusterer = RecipientClusterer(eps=2, min_samples=3)
     labels = clusterer.fit(all_coords)
     
     # Visualize the clusters
-    clusterer.visualize_clusters(all_coords, all_ids, volunteer_coords)
+    output_path = os.path.join("./output", "cluster_map.html")
+    clusterer.visualize_clusters(
+        all_coords, 
+        all_ids, 
+        recipient_boxes,
+        volunteer_coords,
+        save_path=output_path
+    )
 
     
 
