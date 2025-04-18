@@ -36,7 +36,7 @@ class Volunteer(Base):
     archived_deliveries = relationship("DeliveryArchive", back_populates="volunteer")
     
     def __repr__(self):
-        return f"<Volunteer(volunteer_id={self.volunteer_id}, zip_code={self.zip_code}, car_size={self.car_size}, location=({self.latitude}, {self.longitude}))>"
+        return f"<Volunteer(volunteer_id={self.volunteer_id}, zip_code={self.zip_code}, car_size={self.car_size}, location=(32.7767, -96.7970))>"
 
 
 class Recipient(Base):
@@ -193,7 +193,7 @@ class DatabaseHandler:
     def _get_lat_from_zip(self, zip_code):
         """Dummy function to convert zip code to latitude. Would be replaced with actual geocoding."""
         # In a real implementation, use a geocoding service or database
-        return self.coordinates[str(zip_code)]["lat"]
+        return self.coordinates[str(zip_code)]["lat"] if str(zip_code) in self.coordinates else print(f"Invalid zip code: {zip_code}")
     
     def _get_lon_from_zip(self, zip_code):
         """Dummy function to convert zip code to longitude. Would be replaced with actual geocoding."""
@@ -230,7 +230,7 @@ class DatabaseHandler:
         """Retrieve all recipients from the database."""
         session = self.Session()
         recipients = session.query(Recipient).filter(
-            # Recipient.replied == 'Yes',
+            Recipient.replied == 'Yes',
             # Recipient.distributor_id == None
         ).all()
         session.close()

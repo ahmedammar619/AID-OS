@@ -267,7 +267,7 @@ if __name__ == "__main__":
     # Training loop
     stats = trainer.train(
         env=env,
-        num_episodes=15,
+        num_episodes=100,
         max_steps=max_steps,
         print_interval=10,
         checkpoint_interval=50
