@@ -231,7 +231,7 @@ class DatabaseHandler:
         session = self.Session()
         recipients = session.query(Recipient).filter(
             # Recipient.replied == 'Yes',
-            Recipient.distributor_id == None
+            # Recipient.distributor_id == None
         ).all()
         session.close()
         return recipients

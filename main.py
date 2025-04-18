@@ -14,6 +14,7 @@ def main():
     db = DatabaseHandler()
     recipients = db.get_all_recipients()
 
+    print(len(recipients))
     # Combine all points
     all_coords = np.array([[r.latitude, r.longitude] for r in recipients])
     
