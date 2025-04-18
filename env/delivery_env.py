@@ -230,77 +230,93 @@ class DeliveryEnv(gym.Env):
         Compute the current state representation.
         
         Returns:
-            state (numpy.ndarray): The state vector
+            state (numpy.ndarray): The state vector (15 features)
         """
-        # Create feature vector
         features = []
-        
+
         # 1. Percentage of assigned recipients
         assigned_percentage = len(self.assigned_recipients) / self.num_recipients
         features.append(assigned_percentage)
-        
+
         # 2. Average distance in current assignments
         if len(self.assignment_list) > 0:
             distances = [self.distance_matrix[v_idx, r_idx] 
-                         for v_idx, r_idx in self.assignment_list]
+                        for v_idx, r_idx in self.assignment_list]
             avg_distance = np.mean(distances)
-            features.append(avg_distance / 50.0)  # Normalize
+            features.append(avg_distance / 50.0)  # Normalize by 50 km
         else:
             features.append(0.0)
-        
-        # 3. Current utilization of volunteer capacity
+
+        # 3. Average utilization of volunteer capacity
         utilization = []
         for v_idx in range(self.num_volunteers):
             volunteer = self.volunteers[v_idx]
             assigned = self.volunteer_assignments.get(v_idx, [])
-            
             if not assigned:
                 utilization.append(0.0)
             else:
                 current_load = sum(self.recipients[r_idx].num_items for r_idx in assigned)
                 util = current_load / volunteer.car_size
                 utilization.append(util)
-        
         avg_utilization = np.mean(utilization) if utilization else 0.0
         features.append(avg_utilization)
-        
+
         # 4. Variance in utilization
         util_variance = np.var(utilization) if len(utilization) > 1 else 0.0
         features.append(util_variance)
-        
+
         # 5. Percentage of volunteers used
         used_volunteers = len([v for v in utilization if v > 0])
         volunteers_used_percentage = used_volunteers / self.num_volunteers
         features.append(volunteers_used_percentage)
-        
+
         # 6. Average historical match score for current assignments
         if len(self.assignment_list) > 0:
             hist_scores = [self._get_historical_match_score(v_idx, r_idx) 
-                          for v_idx, r_idx in self.assignment_list]
+                        for v_idx, r_idx in self.assignment_list]
             avg_hist_score = np.mean(hist_scores)
-            features.append(avg_hist_score / 3.0)  # Normalize
+            features.append(avg_hist_score / 3.0)  # Normalize by max score
         else:
             features.append(0.0)
-        
-        # 7. Remaining episode progress (steps/max_steps)
+
+        # 7. Remaining episode progress
         episode_progress = self.current_step / self.max_steps
         features.append(episode_progress)
-        
-        # 8-10. Add three dummy features to reach our target feature count
-        # In a real implementation, these would be replaced with more meaningful features
-        features.extend([0.0, 0.0, 0.0])
-        
-        # Add clustering features if enabled
+
+        # 8. Average distance from volunteers to unassigned recipients
+        unassigned = [r_idx for r_idx in range(self.num_recipients) if r_idx not in self.assigned_recipients]
+        if unassigned:
+            distances = [self.distance_matrix[v_idx, r_idx] for v_idx in range(self.num_volunteers) for r_idx in unassigned]
+            avg_unassigned_distance = np.mean(distances) if distances else 0.0
+            features.append(avg_unassigned_distance / 50.0)  # Normalize
+        else:
+            features.append(0.0)
+
+        # 9. Average remaining box need per volunteer
+        total_car_capacity = sum(v.car_size for v in self.volunteers)
+        remaining_boxes = sum(self.recipients[r_idx].num_items for r_idx in unassigned)
+        box_need_ratio = min(1.0, remaining_boxes / total_car_capacity if total_car_capacity > 0 else 0.0)
+        features.append(box_need_ratio)
+
+        # 10. Percentage of unassigned recipients near volunteers (< 5 km)
+        near_count = 0
+        for r_idx in unassigned:
+            if any(self.distance_matrix[v_idx, r_idx] < 5.0 for v_idx in range(self.num_volunteers)):
+                near_count += 1
+        near_percentage = near_count / len(unassigned) if unassigned else 0.0
+        features.append(near_percentage)
+
+        # Clustering features
         if self.use_clustering:
             # 11. Number of clusters
             num_clusters = len(set(self.clusters['labels'])) - (1 if -1 in self.clusters['labels'] else 0)
-            features.append(num_clusters / 10.0)  # Normalize
-            
+            features.append(num_clusters / 25.0)  # Normalize
+
             # 12. Average cluster size
             cluster_sizes = [count for label, count in self.clusters['counts'].items() if label != -1]
             avg_cluster_size = np.mean(cluster_sizes) if cluster_sizes else 0.0
             features.append(avg_cluster_size / self.num_recipients)
-            
+
             # 13. Percentage of recipients in clusters (vs. noise)
             if -1 in self.clusters['counts']:
                 noise_count = self.clusters['counts'][-1]
@@ -308,14 +324,31 @@ class DeliveryEnv(gym.Env):
             else:
                 clustered_percentage = 1.0
             features.append(clustered_percentage)
-            
-            # 14-15. Add two more clustering-related features
-            # In a real implementation, these would be more meaningful
-            features.extend([0.0, 0.0])
-        
-        # Convert to numpy array and ensure correct shape
+
+            # 14. Average distance from volunteers to cluster centers
+            if self.clusters['centers']:
+                center_distances = []
+                for v_idx in range(self.num_volunteers):
+                    vol_lat = self._get_lat_from_zip(self.volunteers[v_idx].zip_code)
+                    vol_lon = self._get_lon_from_zip(self.volunteers[v_idx].zip_code)
+                    for center in self.clusters['centers'].values():
+                        dist = self._haversine_distance(vol_lat, vol_lon, center[0], center[1])
+                        center_distances.append(dist)
+                avg_center_distance = np.mean(center_distances) if center_distances else 0.0
+                features.append(avg_center_distance / 50.0)  # Normalize
+            else:
+                features.append(0.0)
+
+            # 15. Variance in cluster sizes
+            if cluster_sizes:
+                cluster_variance = np.var(cluster_sizes)
+                max_variance = (self.num_recipients ** 2) / 4  # Approx max for normalization
+                features.append(cluster_variance / max_variance if max_variance > 0 else 0.0)
+            else:
+                features.append(0.0)
+
+        # Convert to numpy array
         state = np.array(features, dtype=np.float32)
-        
         return state
     
     def _compute_reward(self, volunteer_idx, recipient_idx):
