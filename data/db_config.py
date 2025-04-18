@@ -28,7 +28,7 @@ class Volunteer(Base):
     longitude = Column(Float, nullable=True)
     latitude = Column(Float, nullable=True)
     replied = Column(String, nullable=False, default='No response')
-    pickup_id = Column(Integer, ForeignKey('collect_location.location_id'))
+    pickup_location_id = Column(Integer, ForeignKey('collect_location.location_id'))
     
     # Relationships
     pickup = relationship("Pickup", back_populates="volunteers")
@@ -325,9 +325,9 @@ def show(array, limit=5):
 if __name__ == "__main__":
     db = DatabaseHandler()
     # db.create_tables()
-    # Volunteers = db.get_all_volunteers()
-    # show(Volunteers)
-    # count(Volunteers)
+    Volunteers = db.get_all_volunteers()
+    show(Volunteers)
+    count(Volunteers)
     pickups = db.get_all_pickups()
     show(pickups)
     count(pickups)

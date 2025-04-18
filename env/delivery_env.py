@@ -329,8 +329,8 @@ class DeliveryEnv(gym.Env):
             if self.clusters['centers']:
                 center_distances = []
                 for v_idx in range(self.num_volunteers):
-                    vol_lat = self._get_lat_from_zip(self.volunteers[v_idx].zip_code)
-                    vol_lon = self._get_lon_from_zip(self.volunteers[v_idx].zip_code)
+                    vol_lat = self.volunteers[v_idx].latitude
+                    vol_lon = self.volunteers[v_idx].longitude
                     for center in self.clusters['centers'].values():
                         dist = self._haversine_distance(vol_lat, vol_lon, center[0], center[1])
                         center_distances.append(dist)

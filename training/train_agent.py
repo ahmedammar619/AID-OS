@@ -80,7 +80,7 @@ class AgentTrainer:
         self.avg_rewards = []
         self.current_episode = 0
         
-    def train(self, env, num_episodes=1000, max_steps=500, print_interval=10, checkpoint_interval=50):
+    def train(self, env, num_episodes=1000, max_steps=600, print_interval=10, checkpoint_interval=50):
         """
         Train the agent on the environment.
         
@@ -176,6 +176,7 @@ class AgentTrainer:
                 print(f"Episode {episode}/{num_episodes} | "
                       f"Reward: {episode_reward:.2f} | "
                       f"Avg Reward: {avg_reward:.2f} | "
+                      f"Expected Reward: {critic_loss:.4f} | "
                       f"Length: {episode_length} | "
                       f"Assignments: {len(env.assigned_recipients)}/{env.num_recipients} | "
                       f"Time: {elapsed:.2f}s")
@@ -251,8 +252,9 @@ if __name__ == "__main__":
     # Create database handler
     db_handler = DatabaseHandler()
     
+    max_steps = 600
     # Create environment
-    env = DeliveryEnv(db_handler=db_handler, max_steps=500)
+    env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps)
     
     # Create trainer
     trainer = AgentTrainer(
@@ -265,8 +267,8 @@ if __name__ == "__main__":
     # Training loop
     stats = trainer.train(
         env=env,
-        num_episodes=500,
-        max_steps=500,
+        num_episodes=15,
+        max_steps=max_steps,
         print_interval=10,
         checkpoint_interval=50
     )
