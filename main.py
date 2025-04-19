@@ -31,7 +31,7 @@ def main():
     longitudes = np.random.uniform(lon_min, lon_max, num_volunteers)
 
     # Combine into a list of tuples
-    volunteer_coords = np.array(list(zip(latitudes, longitudes)))
+    volunteer_coords = np.array([[v.latitude, v.longitude] for v in db.get_all_volunteers()])
     # Initialize and fit the clusterer
     clusterer = RecipientClusterer(
         min_cluster_size=2,
