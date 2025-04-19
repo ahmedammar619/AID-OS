@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.rl_agent import ActorCriticAgent
 from env.delivery_env import DeliveryEnv
 from data.db_config import DatabaseHandler
-
+from clustering.dbscan_cluster import RecipientClusterer
 
 class AgentTrainer:
     """
@@ -80,7 +80,7 @@ class AgentTrainer:
         self.avg_rewards = []
         self.current_episode = 0
         
-    def train(self, env, num_episodes=1000, max_steps=600, print_interval=10, checkpoint_interval=50):
+    def train(self, env, num_episodes=1000, max_steps=600, print_interval=10, checkpoint_interval=50, agent_num_updates=10):
         """
         Train the agent on the environment.
         
@@ -127,7 +127,7 @@ class AgentTrainer:
             # Episode loop
             for step in range(max_steps):
                 # Select action
-                action, _ = self.agent.select_action(state)
+                action, _ = self.agent.select_action(state, env)
                 
                 # Take step in environment
                 next_state, reward, done, info = env.step(action)
@@ -152,7 +152,7 @@ class AgentTrainer:
                     break
             
             # Train agent after episode
-            actor_loss, critic_loss = self.agent.train(num_updates=min(episode_length, 5))
+            actor_loss, critic_loss = self.agent.train(num_updates=min(episode_length, agent_num_updates))
             
             # Store episode statistics
             self.episode_rewards.append(episode_reward)
@@ -253,24 +253,37 @@ if __name__ == "__main__":
     db_handler = DatabaseHandler()
     
     max_steps = 40
+
+    
+    # Create clusterer
+    clusterer = RecipientClusterer(
+        min_cluster_size=2,
+        cluster_selection_epsilon=0.00005,
+        min_samples=1
+    )
+    
     # Create environment
-    env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_cluster=True)
+    env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=True, clusterer=clusterer)
     
     # Create trainer
     trainer = AgentTrainer(
         state_dim=env.observation_space.shape[0],
         action_dim=env.action_space.n,
         db_handler=db_handler,
-        device="cuda" if torch.cuda.is_available() else "cpu"
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        actor_lr=0.0001,
+        critic_lr=0.0002,
+        gamma=0.95
     )
     
     # Training loop
     stats = trainer.train(
         env=env,
-        num_episodes=2000,
+        num_episodes=1500,
         max_steps=max_steps,
         print_interval=10,
-        checkpoint_interval=500
+        checkpoint_interval=500,
+        agent_num_updates=10
     )
     
     print("Training complete!")

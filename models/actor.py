@@ -63,32 +63,70 @@ class Actor(nn.Module):
         action_probs = F.softmax(logits, dim=-1)
         return action_probs
     
-    def select_action(self, state, deterministic=False):
+
+    def select_action(self, state, env=None, deterministic=False):
         """
-        Select an action based on the current policy.
+        Select an action with masking for invalid actions.
         
         Args:
-            state (torch.Tensor): Current state representation
-            deterministic (bool): If True, select the most probable action,
-                                 otherwise sample from the distribution
+            state (np.ndarray): Current state
+            env (DeliveryEnv): Environment to check valid actions
+            deterministic (bool): If True, select most probable valid action
         
         Returns:
-            action (int): The selected action index
-            action_prob (float): Probability of the selected action
+            action (int): Selected action index
+            action_prob (float): Probability of selected action
         """
         with torch.no_grad():
             action_probs = self.forward(state)
-            
-        if deterministic:
-            # Choose the action with highest probability
-            action = torch.argmax(action_probs).item()
-        else:
-            # Sample from the probability distribution
-            action_distribution = torch.distributions.Categorical(action_probs)
-            action = action_distribution.sample().item()
         
-        # Return the action and its probability
-        return action, action_probs[0, action].item()
+        if env:
+            # Create mask for valid actions
+            action_mask = torch.zeros_like(action_probs)
+            num_recipients = env.num_recipients
+            
+            for action in range(action_probs.size(1)):
+                volunteer_idx = action // num_recipients
+                recipient_idx = action % num_recipients
+                
+                # Check if recipient is already assigned
+                if recipient_idx not in env.assigned_recipients:
+                    action_mask[0, action] = 1
+                    continue
+
+                
+                # Check if assignment exceeds capacity
+                volunteer = env.volunteers[volunteer_idx]
+                recipient = env.recipients[recipient_idx]
+                current_load = sum(env.recipients[r_idx].num_items 
+                                for r_idx in env.volunteer_assignments.get(volunteer_idx, []))
+                if current_load + recipient.num_items <= volunteer.car_size+1:
+                    action_mask[0, action] = 1
+            
+            # If no valid actions, return a special termination action
+            if action_mask.sum() == 0:
+                return -1, 1.0  # Special termination action
+            
+            # Apply mask and normalize probabilities
+            masked_probs = action_probs * action_mask
+            masked_probs = masked_probs / (masked_probs.sum() + 1e-8)  # Add small epsilon
+            
+            if deterministic:
+                action = torch.argmax(masked_probs).item()
+            else:
+                dist = torch.distributions.Categorical(masked_probs)
+                action = dist.sample().item()
+
+            action_prob = masked_probs[0, action].item()
+        else:
+            if deterministic:
+                action = torch.argmax(action_probs).item()
+            else:
+                dist = torch.distributions.Categorical(action_probs)
+                action = dist.sample().item()
+            action_prob = action_probs[0, action].item()
+            
+        return action, action_prob
 
     def get_log_prob(self, state, action):
         """

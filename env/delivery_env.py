@@ -370,7 +370,7 @@ class DeliveryEnv(gym.Env):
         
         # 2. Proximity reward (0-2)
         distance = self.distance_matrix[volunteer_idx, recipient_idx]
-        proximity_reward = max(0, 2 - (distance / 5))  # Decreases with distance
+        proximity_reward = max(0, 2 - (distance / 10))  # Decreases with distance
         reward += proximity_reward
         
         # 3. Capacity compatibility reward
@@ -477,21 +477,18 @@ class DeliveryEnv(gym.Env):
         # Initialize reward
         reward = 0.0
         
-        # Process valid action
-        if valid_action:
-            # Update assignments
-            self.assignment_list.append((volunteer_idx, recipient_idx))
-            self.assigned_recipients.add(recipient_idx)
-            
-            if volunteer_idx not in self.volunteer_assignments:
-                self.volunteer_assignments[volunteer_idx] = []
-            self.volunteer_assignments[volunteer_idx].append(recipient_idx)
-            
-            # Compute reward for this assignment
-            reward = self._compute_reward(volunteer_idx, recipient_idx)
-        else:
-            # Invalid action penalty
-            reward = -5.0
+
+        # Update assignments
+        self.assignment_list.append((volunteer_idx, recipient_idx))
+        self.assigned_recipients.add(recipient_idx)
+        
+        if volunteer_idx not in self.volunteer_assignments:
+            self.volunteer_assignments[volunteer_idx] = []
+        self.volunteer_assignments[volunteer_idx].append(recipient_idx)
+        
+        # Compute reward for this assignment
+        reward = self._compute_reward(volunteer_idx, recipient_idx)
+
         
         # Update state
         self.state = self._compute_state()

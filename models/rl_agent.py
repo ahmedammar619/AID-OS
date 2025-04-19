@@ -72,7 +72,7 @@ class ActorCriticAgent:
         self.episode_lengths = []
         self.training_steps = 0
     
-    def select_action(self, state, deterministic=False):
+    def select_action(self, state, env=None, deterministic=False):
         """
         Select an action based on the current policy.
         
@@ -89,7 +89,7 @@ class ActorCriticAgent:
         state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         
         # Get action from the actor
-        return self.actor.select_action(state_tensor, deterministic)
+        return self.actor.select_action(state_tensor, env, deterministic)
     
     def get_value(self, state):
         """

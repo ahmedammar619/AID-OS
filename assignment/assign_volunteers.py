@@ -136,7 +136,7 @@ class VolunteerAssigner:
         
         while not done and step < max_steps:
             # Select action
-            action, _ = self.agent.select_action(state, deterministic=deterministic)
+            action, _ = self.agent.select_action(state, env=self.env, deterministic=deterministic)
             
             # Take step in environment
             next_state, reward, done, info = self.env.step(action)
