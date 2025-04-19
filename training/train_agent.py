@@ -176,7 +176,6 @@ class AgentTrainer:
                 print(f"Episode {episode}/{num_episodes} | "
                       f"Reward: {episode_reward:.2f} | "
                       f"Avg Reward: {avg_reward:.2f} | "
-                      f"Expected Reward: {critic_loss:.4f} | "
                       f"Length: {episode_length} | "
                       f"Assignments: {len(env.assigned_recipients)}/{env.num_recipients} | "
                       f"Time: {elapsed:.2f}s")

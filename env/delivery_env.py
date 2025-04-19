@@ -496,6 +496,13 @@ class DeliveryEnv(gym.Env):
         # Compute reward for this assignment
         reward = self._compute_reward(volunteer_idx, recipient_idx)
 
+        # Penalize every step
+        reward -= 0.1
+
+        # Penalize if no recipient was assigned (invalid action)
+        if not valid_action:
+            reward -= 1.0
+
         # Update state
         self.state = self._compute_state()
         
@@ -520,6 +527,11 @@ class DeliveryEnv(gym.Env):
     
         if not valid_actions_exist or self.current_step >= self.max_steps:
             done = True
+
+        # At episode end, penalize for unassigned recipients
+        if done:
+            num_unassigned = self.num_recipients - len(self.assigned_recipients)
+            reward -= 2.0 * num_unassigned
 
         # Additional info
         info = {
