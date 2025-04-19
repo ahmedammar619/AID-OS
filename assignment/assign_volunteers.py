@@ -14,6 +14,7 @@ import json
 import torch
 from datetime import datetime
 import matplotlib.pyplot as plt
+import folium
 import seaborn as sns
 
 # Add parent directory to path to import from project modules
@@ -43,6 +44,8 @@ class VolunteerAssigner:
         db_handler=None,
         feedback_handler=None,
         use_clustering=True,
+        cluster_eps=0.00005,
+        max_steps=1000,
         output_dir="./output"
     ):
         """
@@ -66,8 +69,11 @@ class VolunteerAssigner:
         # Initialize environment
         self.env = DeliveryEnv(
             db_handler=self.db_handler,
-            use_clustering=use_clustering
+            use_clustering=use_clustering,
+            cluster_eps=cluster_eps,
+            max_steps=max_steps
         )
+
         
         # Load the agent if path is provided
         self.agent = None
@@ -203,7 +209,7 @@ class VolunteerAssigner:
             
             data.append({
                 'volunteer_id': volunteer.volunteer_id,
-                'volunteer_zip': volunteer.zip_code,
+                # 'volunteer_zip': volunteer.zip_code,
                 'volunteer_capacity': volunteer.car_size,
                 'recipient_id': recipient.recipient_id,
                 'recipient_lat': recipient.latitude,
@@ -221,88 +227,196 @@ class VolunteerAssigner:
     
     def visualize_assignments(self, save_path=None, show=True):
         """
-        Visualize the generated assignments on a map.
+        Visualize volunteer-recipient assignments using Leaflet
         
         Args:
-            save_path (str, optional): Path to save the visualization
-            show (bool): Whether to display the plot
-            
-        Returns:
-            bool: Whether visualization was successful
+            save_path (str): Optional path to save HTML file
+            show (bool): Whether to display the visualization
         """
-        if not self.assignments:
-            print("No assignments to visualize. Generate assignments first.")
-            return False
-        
-        # Create figure
-        plt.figure(figsize=(12, 10))
+        import folium
         
         # Get coordinates
         volunteer_coords = self.env.volunteer_coords
         recipient_coords = self.env.recipient_coords
         
-        # Plot recipients
-        plt.scatter(
-            recipient_coords[:, 1],  # longitude
-            recipient_coords[:, 0],  # latitude
-            c='blue', s=50, alpha=0.7, label='Recipients'
-        )
+        # Create map centered on mean location
+        mean_lat = (volunteer_coords[:, 0].mean() + recipient_coords[:, 0].mean()) / 2
+        mean_lon = (volunteer_coords[:, 1].mean() + recipient_coords[:, 1].mean()) / 2
+        m = folium.Map(location=[mean_lat, mean_lon], zoom_start=12)
         
-        # Plot volunteers
-        for i in range(len(volunteer_coords)):
-            if volunteer_coords[i, 0] <1:
-                print("Invalid coordinates for volunteer", i)
-                volunteer_coords[i, 0] = 32.7767
-                volunteer_coords[i, 1] = -96.7970
-                
-        plt.scatter(
-            volunteer_coords[:, 1],  # longitude
-            volunteer_coords[:, 0],  # latitude
-            c='red', s=100, marker='^', label='Volunteers'
-        )
+        # Define color palette for volunteers
+        volunteer_colors = {
+            0: 'red',
+            1: 'blue',
+            2: 'green',
+            3: 'purple',
+            4: 'orange',
+            5: 'darkred'
+        }
         
-        # Plot assignments
-        for volunteer_idx, recipient_idx in self.assignments:
-            vol_lon = volunteer_coords[volunteer_idx, 1]
-            vol_lat = volunteer_coords[volunteer_idx, 0]
-            rec_lon = recipient_coords[recipient_idx, 1]
-            rec_lat = recipient_coords[recipient_idx, 0]
+        # Add volunteers with interactive popups
+        for i, (lat, lon) in enumerate(volunteer_coords):
+            if lat < 1:  # Handle invalid coordinates
+                lat, lon = 32.7767, -96.7970
             
-            plt.plot(
-                [vol_lon, rec_lon],
-                [vol_lat, rec_lat],
-                'k-', alpha=0.2
-            )
+            color = volunteer_colors.get(i % len(volunteer_colors), 'red')
+            
+            # Get volunteer's assignments
+            assigned_recipients = [r for v,r in self.assignments if v == i]
+            total_boxes = sum(self.env.recipients[r].num_items for r in assigned_recipients)
+            capacity = self.env.volunteers[i].car_size
+            
+            # Build popup HTML
+            popup_html = f"""
+            <div style='width: 250px'>
+                <h4>Volunteer {i}</h4>
+                <p><b>Capacity:</b> {capacity} boxes</p>
+                <p><b>Used:</b> {total_boxes} boxes ({total_boxes/capacity*100:.1f}%)</p>
+                
+                <h5>Recipients ({len(assigned_recipients)}):</h5>
+                <ul>
+            """
+            
+            for r in assigned_recipients:
+                recipient = self.env.recipients[r]
+                popup_html += f"<li>Recipient {r}: {recipient.num_items} boxes</li>"
+            
+            popup_html += "</ul>"
+            
+            # Add cluster info if available
+            if hasattr(self.env, 'clusters') and self.env.clusters is not None:
+                labels = self.env.clusters.get('labels', [])
+                if len(labels) > r:
+                    cluster_id = labels[r]
+                    if cluster_id != -1:
+                        popup_html += f"<p><b>Cluster:</b> {cluster_id}</p>"
+            
+            popup_html += "</div>"
+            
+            # Create marker with popup
+            folium.Marker(
+                [lat, lon],
+                icon=folium.Icon(color=color, icon='user', prefix='fa'),
+                tooltip=f'Volunteer {i} ({total_boxes}/{capacity} boxes)',
+                popup=folium.Popup(popup_html, max_width=300)
+            ).add_to(m)
         
-        # Plot cluster centers if available
+        # Add recipients (circles)
+        for i, (lat, lon) in enumerate(recipient_coords):
+            folium.CircleMarker(
+                [lat, lon],
+                radius=5,
+                color='gray',
+                fill=True,
+                fill_color='gray',
+                tooltip=f'Recipient {i}'
+            ).add_to(m)
+        
+        # Add assignment lines with matching volunteer colors
+        for volunteer_idx, recipient_idx in self.assignments:
+            vol_coords = volunteer_coords[volunteer_idx]
+            rec_coords = recipient_coords[recipient_idx]
+            
+            color = volunteer_colors.get(volunteer_idx % len(volunteer_colors), 'gray')
+            
+            folium.PolyLine(
+                locations=[vol_coords, rec_coords],
+                color=color,
+                weight=3,  # Thicker lines
+                opacity=0.7
+            ).add_to(m)
+        
+        # Add cluster visualization if available
         if hasattr(self.env, 'clusters') and self.env.clusters is not None:
             centers = self.env.clusters.get('centers', {})
+            labels = self.env.clusters.get('labels', [])
+            coordinates = self.env.recipient_coords
+            
+            # Define cluster colors
+            cluster_colors = [
+                'red', 'blue', 'green', 'purple', 'orange', 'darkred',
+                'lightred', 'beige', 'darkblue', 'darkgreen', 'cadetblue'
+            ]
+            
+            # Add cluster visualization
             for label, center in centers.items():
                 if label != -1:  # Skip noise cluster
-                    plt.scatter(
-                        center[1],  # longitude
-                        center[0],  # latitude
-                        c='green', s=200, marker='*', edgecolors='k',
-                        label='Cluster Center' if label == next(iter(centers)) else ""
-                    )
-        
-        # Add labels
-        plt.title('Volunteer-Recipient Assignments')
-        plt.xlabel('Longitude')
-        plt.ylabel('Latitude')
-        plt.legend()
-        plt.grid(True)
+                    # Get cluster members and coordinates
+                    cluster_indices = [i for i, l in enumerate(labels) if l == label]
+                    cluster_points = coordinates[cluster_indices]
+                    
+                    # Calculate cluster radius (max distance from center)
+                    max_distance = 0
+                    for point in cluster_points:
+                        dist = np.linalg.norm(point - center)
+                        if dist > max_distance:
+                            max_distance = dist
+                    radius = max_distance * 111320  # Convert to meters (approx)
+                    
+                    # Create popup with cluster details
+                    popup_html = f"""
+                    <div style='width: 250px'>
+                        <h4>Cluster {label}</h4>
+                        <p><b>Center:</b> {center[0]:.4f}, {center[1]:.4f}</p>
+                        <p><b>Members:</b> {len(cluster_indices)} recipients</p>
+                        <p><b>Radius:</b> {radius:.0f} meters</p>
+                    """
+                    
+                    # Add styled cluster center marker
+                    color = cluster_colors[label % len(cluster_colors)]
+                    folium.Marker(
+                        [center[0], center[1]],
+                        icon=folium.Icon(
+                            color=color,
+                            icon='star',
+                            prefix='fa',
+                            icon_color='white'
+                        ),
+                        tooltip=f'Cluster {label} ({len(cluster_indices)} recipients)',
+                        popup=folium.Popup(popup_html, max_width=300)
+                    ).add_to(m)
+                    
+                    # Add circle showing actual cluster coverage
+                    folium.Circle(
+                        location=[center[0], center[1]],
+                        radius=radius,
+                        color=color,
+                        fill=True,
+                        fill_color=color,
+                        fill_opacity=0.1,
+                        weight=2
+                    ).add_to(m)
+                    
+                    # Add cluster members
+                    for idx in cluster_indices:
+                        point = coordinates[idx]
+                        folium.CircleMarker(
+                            location=[point[0], point[1]],
+                            radius=4,
+                            color=color,
+                            fill=True,
+                            fill_color=color,
+                            fill_opacity=0.7,
+                            weight=1
+                        ).add_to(m)
         
         # Save or show
         if save_path:
-            plt.savefig(save_path)
+            m.save(save_path)
             print(f"Visualization saved to {save_path}")
         
         if show:
-            plt.show()
-        else:
-            plt.close()
-        
+            import tempfile
+            import webbrowser
+            
+            # Create temp file
+            with tempfile.NamedTemporaryFile(suffix='.html', delete=False) as f:
+                temp_path = f.name
+                m.save(temp_path)
+            
+            # Open in default browser
+            webbrowser.open(f'file://{temp_path}')
+            
         return True
     
     def visualize_volunteer_load(self, save_path=None, show=True):
@@ -428,7 +542,7 @@ class VolunteerAssigner:
                 utilization = total_boxes / volunteer.car_size * 100
                 
                 report += f"### Volunteer {volunteer_id}\n\n"
-                report += f"- **Zip Code:** {volunteer.zip_code}\n"
+                # report += f"- **Zip Code:** {volunteer.zip_code}\n"
                 report += f"- **Car Capacity:** {volunteer.car_size} boxes\n"
                 report += f"- **Assigned Load:** {total_boxes} boxes ({utilization:.1f}% utilization)\n"
                 report += f"- **Assigned Recipients:** {len(recipient_ids)}\n\n"
@@ -552,7 +666,7 @@ class VolunteerAssigner:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
             # Assignment map
-            map_path = os.path.join(self.output_dir, f"assignment_map_{timestamp}.png")
+            map_path = os.path.join(self.output_dir, f"assignment_map_{timestamp}.html")
             self.visualize_assignments(save_path=map_path, show=False)
             
             # Load distribution
@@ -570,7 +684,10 @@ class VolunteerAssigner:
 
 if __name__ == "__main__":
     # Test the assigner
-    assigner = VolunteerAssigner()
+    assigner = VolunteerAssigner(
+        use_clustering=True,
+        max_steps=40
+    )
     
     # Check if a trained agent exists, otherwise create a simple agent for testing
     checkpoint_dir = "./checkpoints"
@@ -592,7 +709,7 @@ if __name__ == "__main__":
     
     # Visualize
     assigner.visualize_assignments()
-    assigner.visualize_volunteer_load()
+    # assigner.visualize_volunteer_load()
     
     # Generate and print report
     report = assigner.generate_assignment_report()

@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.rl_agent import ActorCriticAgent
 from env.delivery_env import DeliveryEnv
 from data.db_config import DatabaseHandler
-from clustering.dbscan_cluster import RecipientClusterer
+
 
 class AgentTrainer:
     """
@@ -254,16 +254,8 @@ if __name__ == "__main__":
     
     max_steps = 40
 
-    
-    # Create clusterer
-    clusterer = RecipientClusterer(
-        min_cluster_size=2,
-        cluster_selection_epsilon=0.00005,
-        min_samples=1
-    )
-    
     # Create environment
-    env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=True, clusterer=clusterer)
+    env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=True, cluster_eps=0.00005)
     
     # Create trainer
     trainer = AgentTrainer(
@@ -279,7 +271,7 @@ if __name__ == "__main__":
     # Training loop
     stats = trainer.train(
         env=env,
-        num_episodes=1500,
+        num_episodes=100,
         max_steps=max_steps,
         print_interval=10,
         checkpoint_interval=500,

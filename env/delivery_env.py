@@ -29,7 +29,7 @@ class DeliveryEnv(gym.Env):
     
     metadata = {'render.modes': ['human']}
     
-    def __init__(self, db_handler=None, clusterer=None, use_clustering=True, max_steps=1000):
+    def __init__(self, db_handler=None, use_clustering=True, max_steps=1000, cluster_eps=0.00005):
         """
         Initialize the delivery environment.
         
@@ -45,7 +45,14 @@ class DeliveryEnv(gym.Env):
         self.db_handler = db_handler if db_handler is not None else DatabaseHandler()
         
         # Initialize clusterer
-        self.clusterer = clusterer if clusterer is not None else RecipientClusterer()
+        if use_clustering:
+            self.clusterer = RecipientClusterer(
+                min_cluster_size=2,
+                cluster_selection_epsilon=cluster_eps,
+                min_samples=1
+            )
+        else:
+            self.clusterer = None
         self.use_clustering = use_clustering
         
         # Load initial data
