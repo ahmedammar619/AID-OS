@@ -7,41 +7,40 @@ Handles MySQL connection using SQLAlchemy.
 """
 
 from collections import namedtuple
-# Define namedtuples to match expected structure
-vol = namedtuple('Volunteer', ['volunteer_id', 'latitude', 'longitude', 'car_size'])
-rec = namedtuple('Recipient', ['recipient_id', 'latitude', 'longitude', 'num_items'])
-# Test volunteers
+import random
+
+# Define your data structures
+Volunteer = namedtuple('Volunteer', ['volunteer_id', 'latitude', 'longitude', 'car_size'])
+Recipient = namedtuple('Recipient', ['recipient_id', 'latitude', 'longitude', 'num_items'])
+
+# 20 volunteers spread over a city grid
+random.seed(42)
 test_volunteers = [
-    vol(1, 33.9731, -118.2479, 15),  # V1: South LA
-    vol(2, 34.1031, -118.4108, 10),  # V2: Beverly Hills
-    vol(3, 34.0407, -118.2637, 12),  # V3: Downtown LA
+    Volunteer(i,
+        34.00  + random.uniform(-0.1,0.1),
+        -118.25 + random.uniform(-0.1,0.1),
+        random.choice([5, 8, 10, 12, 15, 20])
+    )
+    for i in range(1,21)
 ]
-# Test recipients
-test_recipients = [
-    # Northwest Cluster (Beverly Hills)
-    rec(1, 34.0700, -118.4000, 2),  # R1
-    rec(2, 34.0701, -118.4001, 3),  # R2
-    rec(3, 34.0699, -118.3999, 4),  # R3
-    rec(4, 34.0702, -118.4002, 1),  # R4
-    rec(5, 34.0698, -118.3998, 5),  # R5
-    # Southeast Cluster (South LA)
-    rec(6, 33.9700, -118.2400, 1),  # R6
-    rec(7, 33.9701, -118.2401, 2),  # R7
-    rec(8, 33.9699, -118.2399, 2),  # R8
-    rec(9, 33.9702, -118.2402, 3),  # R9
-    # Scattered
-    rec(10, 34.0000, -118.3000, 1),  # R10
-    rec(11, 34.0500, -118.3200, 4),  # R11
-    rec(12, 34.0407, -118.2637, 2),  # R12
-    rec(13, 34.0200, -118.2800, 3),  # R13
-    rec(14, 34.1000, -118.3500, 5),  # R14
-    rec(15, 34.1500, -118.4500, 1),  # R15
-    rec(16, 34.0300, -118.2900, 6),  # R16
-    rec(17, 34.0410, -118.2640, 1),  # R17
-    rec(18, 34.0600, -118.3800, 2),  # R18
-    rec(19, 33.9900, -118.2600, 2),  # R19
-    rec(20, 34.0100, -118.3100, 3),  # R20
-]
+
+# 50 recipients: most need 1 box, a few outliers need 10–30
+test_recipients = []
+for i in range(1,51):
+    lat = 34.00  + random.uniform(-0.15,0.15)
+    lon = -118.25 + random.uniform(-0.15,0.15)
+    if i % 20 == 0:
+        boxes = random.choice([10,20,30])   # big outlier every 20th
+    elif i % 7 == 0:
+        boxes = random.choice([5,8,12])     # medium outlier every 7th
+    else:
+        boxes = 1                           # typical case
+    test_recipients.append(Recipient(i, lat, lon, boxes))
+
+# Quick sanity prints
+# print("Volunteers:", len(test_volunteers))
+# print("Recipients:", len(test_recipients))
+# print(test_volunteers[:3], test_recipients[:5])
 
 
 

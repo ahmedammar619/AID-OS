@@ -496,7 +496,6 @@ class DeliveryEnv(gym.Env):
         # Compute reward for this assignment
         reward = self._compute_reward(volunteer_idx, recipient_idx)
 
-        
         # Update state
         self.state = self._compute_state()
         
@@ -506,6 +505,22 @@ class DeliveryEnv(gym.Env):
         # Check if episode is done
         done = len(self.assigned_recipients) == self.num_recipients or self.current_step >= self.max_steps
         
+        # Check for valid actions
+        valid_actions_exist = False
+        for v_idx in range(self.num_volunteers):
+            current_load = sum(self.recipients[r_idx].num_items 
+                              for r_idx in self.volunteer_assignments.get(v_idx, []))
+            for r_idx in range(self.num_recipients):
+                if r_idx not in self.assigned_recipients:
+                    if current_load + self.recipients[r_idx].num_items <= self.volunteers[v_idx].car_size:
+                        valid_actions_exist = True
+                        break
+            if valid_actions_exist: 
+                break
+    
+        if not valid_actions_exist or self.current_step >= self.max_steps:
+            done = True
+
         # Additional info
         info = {
             'valid_action': valid_action,

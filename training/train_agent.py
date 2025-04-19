@@ -252,7 +252,7 @@ if __name__ == "__main__":
     # Create database handler
     db_handler = DatabaseHandler()
     
-    max_steps = 40
+    max_steps = 60
 
     # Create environment
     env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=True, cluster_eps=0.00005)
@@ -271,7 +271,7 @@ if __name__ == "__main__":
     # Training loop
     stats = trainer.train(
         env=env,
-        num_episodes=100,
+        num_episodes=51,
         max_steps=max_steps,
         print_interval=10,
         checkpoint_interval=500,

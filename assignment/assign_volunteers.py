@@ -286,10 +286,12 @@ class VolunteerAssigner:
             # Add cluster info if available
             if hasattr(self.env, 'clusters') and self.env.clusters is not None:
                 labels = self.env.clusters.get('labels', [])
-                if len(labels) > r:
-                    cluster_id = labels[r]
-                    if cluster_id != -1:
-                        popup_html += f"<p><b>Cluster:</b> {cluster_id}</p>"
+                if assigned_recipients:
+                    first_recipient = assigned_recipients[0]
+                    if len(labels) > first_recipient:
+                        cluster_id = labels[first_recipient]
+                        if cluster_id != -1:
+                            popup_html += f"<p><b>Primary Cluster:</b> {cluster_id}</p>"
             
             popup_html += "</div>"
             
