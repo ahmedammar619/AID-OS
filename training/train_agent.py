@@ -107,83 +107,90 @@ class AgentTrainer:
         # Start training loop
         start_time = time.time()
         
-        for episode in range(1, num_episodes + 1):
-            self.current_episode = episode
-            
-            # Reset environment
-            state = env.reset()
-            
-            # Episode variables
-            episode_reward = 0
-            episode_length = 0
-            
-            # Lists to store transitions
-            states = []
-            actions = []
-            rewards = []
-            next_states = []
-            dones = []
-            
-            # Episode loop
-            for step in range(max_steps):
-                # Select action
-                action, _ = self.agent.select_action(state, env)
+        try:
+            for episode in range(1, num_episodes + 1):
+                self.current_episode = episode
                 
-                # Take step in environment
-                next_state, reward, done, info = env.step(action)
+                # Reset environment
+                state = env.reset()
                 
-                # Store transition
-                states.append(state)
-                actions.append(action)
-                rewards.append(reward)
-                next_states.append(next_state)
-                dones.append(done)
+                # Episode variables
+                episode_reward = 0
+                episode_length = 0
                 
-                # Update agent with new transition
-                self.agent.store_transition(state, action, reward, next_state, done)
+                # Lists to store transitions
+                states = []
+                actions = []
+                rewards = []
+                next_states = []
+                dones = []
                 
-                # Update state and counters
-                state = next_state
-                episode_reward += reward
-                episode_length += 1
+                # Episode loop
+                for step in range(max_steps):
+                    # Select action
+                    action, _ = self.agent.select_action(state, env)
+                    
+                    # Take step in environment
+                    next_state, reward, done, info = env.step(action)
+                    
+                    # Store transition
+                    states.append(state)
+                    actions.append(action)
+                    rewards.append(reward)
+                    next_states.append(next_state)
+                    dones.append(done)
+                    
+                    # Update agent with new transition
+                    self.agent.store_transition(state, action, reward, next_state, done)
+                    
+                    # Update state and counters
+                    state = next_state
+                    episode_reward += reward
+                    episode_length += 1
+                    
+                    # Break if done
+                    if done:
+                        break
                 
-                # Break if done
-                if done:
-                    break
-            
-            # Train agent after episode
-            actor_loss, critic_loss = self.agent.train(num_updates=min(episode_length, agent_num_updates))
-            
-            # Store episode statistics
-            self.episode_rewards.append(episode_reward)
-            self.episode_lengths.append(episode_length)
-            
-            # Calculate moving average reward
-            avg_reward = np.mean(self.episode_rewards[-100:])
-            self.avg_rewards.append(avg_reward)
-            
-            # Update stats dictionary
-            stats['episode'].append(episode)
-            stats['reward'].append(episode_reward)
-            stats['length'].append(episode_length)
-            stats['actor_loss'].append(actor_loss)
-            stats['critic_loss'].append(critic_loss)
-            stats['assignments'].append(len(env.assigned_recipients))
-            
-            # Print progress
-            if episode % print_interval == 0:
-                elapsed = time.time() - start_time
-                print(f"Episode {episode}/{num_episodes} | "
-                      f"Reward: {episode_reward:.2f} | "
-                      f"Avg Reward: {avg_reward:.2f} | "
-                      f"Length: {episode_length} | "
-                      f"Assignments: {len(env.assigned_recipients)}/{env.num_recipients} | "
-                      f"Time: {elapsed:.2f}s")
-            
-            # Save checkpoint
-            if episode % checkpoint_interval == 0:
-                self.save_checkpoint(episode)
-                self.plot_training_progress()
+                # Train agent after episode
+                actor_loss, critic_loss = self.agent.train(num_updates=min(episode_length, agent_num_updates))
+                
+                # Store episode statistics
+                self.episode_rewards.append(episode_reward)
+                self.episode_lengths.append(episode_length)
+                
+                # Calculate moving average reward
+                avg_reward = np.mean(self.episode_rewards[-100:])
+                self.avg_rewards.append(avg_reward)
+                
+                # Update stats dictionary
+                stats['episode'].append(episode)
+                stats['reward'].append(episode_reward)
+                stats['length'].append(episode_length)
+                stats['actor_loss'].append(actor_loss)
+                stats['critic_loss'].append(critic_loss)
+                stats['assignments'].append(len(env.assigned_recipients))
+                
+                # Print progress
+                if episode % print_interval == 0:
+                    elapsed = time.time() - start_time
+                    print(f"Episode {episode}/{num_episodes} | "
+                        f"Reward: {episode_reward:.2f} | "
+                        f"Avg Reward: {avg_reward:.2f} | "
+                        f"Length: {episode_length} | "
+                        f"Assignments: {len(env.assigned_recipients)}/{env.num_recipients} | "
+                        f"Time: {elapsed:.2f}s")
+                
+                # Save checkpoint
+                if episode % checkpoint_interval == 0:
+                    self.save_checkpoint(episode)
+                    self.plot_training_progress()
+
+        except KeyboardInterrupt:
+            print("\nTraining interrupted by user (Ctrl+C). Saving checkpoint and exiting...")
+            self.save_checkpoint("interrupted")
+            self.plot_training_progress()
+            return stats
         
         # Save final model
         self.save_checkpoint("final")

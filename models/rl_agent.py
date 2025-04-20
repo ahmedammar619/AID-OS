@@ -144,12 +144,13 @@ class ActorCriticAgent:
             # Unpack the batch
             states, actions, rewards, next_states, dones = zip(*minibatch)
             
-            # Convert to tensors
-            state_batch = torch.FloatTensor(states).to(self.device)
-            action_batch = torch.LongTensor(actions).to(self.device)
-            reward_batch = torch.FloatTensor(rewards).to(self.device)
-            next_state_batch = torch.FloatTensor(next_states).to(self.device)
-            done_batch = torch.FloatTensor(dones).to(self.device)
+            # Convert to tensors (fix slow conversion warning)
+            import numpy as np
+            state_batch = torch.FloatTensor(np.array(states)).to(self.device)
+            action_batch = torch.LongTensor(np.array(actions)).to(self.device)
+            reward_batch = torch.FloatTensor(np.array(rewards)).to(self.device)
+            next_state_batch = torch.FloatTensor(np.array(next_states)).to(self.device)
+            done_batch = torch.FloatTensor(np.array(dones)).to(self.device)
             
             # Calculate state values
             values = self.critic(state_batch).squeeze()

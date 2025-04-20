@@ -13,9 +13,11 @@ import torch
 import numpy as np
 from datetime import datetime
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
+
 # Import project modules
 from data.db_config import DatabaseHandler
-from models.rl_agent import ActorCriticAgent
 from env.delivery_env import DeliveryEnv
 from clustering.dbscan_cluster import RecipientClusterer
 from training.train_agent import AgentTrainer
