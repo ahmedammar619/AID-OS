@@ -299,7 +299,7 @@ class VolunteerAssigner:
             folium.Marker(
                 [lat, lon],
                 icon=folium.Icon(color=color, icon='user', prefix='fa'),
-                tooltip=f'Volunteer {i} ({total_boxes}/{capacity} boxes)',
+                tooltip=f'Volunteer {i} ({total_boxes}/{capacity} boxes) : (recipients:{len(assigned_recipients)})',
                 popup=folium.Popup(popup_html, max_width=300)
             ).add_to(m)
         
@@ -307,11 +307,11 @@ class VolunteerAssigner:
         for i, (lat, lon) in enumerate(recipient_coords):
             folium.CircleMarker(
                 [lat, lon],
-                radius=5,
+                radius=6,
                 color='gray',
                 fill=True,
                 fill_color='gray',
-                tooltip=f'Recipient {i}'
+                tooltip=f'Recipient {i} : {self.env.recipients[i].num_items} boxes'
             ).add_to(m)
         
         # Add assignment lines with matching volunteer colors
@@ -366,28 +366,28 @@ class VolunteerAssigner:
                     
                     # Add styled cluster center marker
                     color = cluster_colors[label % len(cluster_colors)]
-                    folium.Marker(
-                        [center[0], center[1]],
-                        icon=folium.Icon(
-                            color=color,
-                            icon='star',
-                            prefix='fa',
-                            icon_color='white'
-                        ),
-                        tooltip=f'Cluster {label} ({len(cluster_indices)} recipients)',
-                        popup=folium.Popup(popup_html, max_width=300)
-                    ).add_to(m)
+                    # folium.Marker(
+                    #     [center[0], center[1]],
+                    #     icon=folium.Icon(
+                    #         color=color,
+                    #         icon='star',
+                    #         prefix='fa',
+                    #         icon_color='white'
+                    #     ),
+                    #     tooltip=f'Cluster {label} ({len(cluster_indices)} recipients)',
+                    #     popup=folium.Popup(popup_html, max_width=300)
+                    # ).add_to(m)
                     
                     # Add circle showing actual cluster coverage
-                    folium.Circle(
-                        location=[center[0], center[1]],
-                        radius=radius,
-                        color=color,
-                        fill=True,
-                        fill_color=color,
-                        fill_opacity=0.1,
-                        weight=2
-                    ).add_to(m)
+                    # folium.Circle(
+                    #     location=[center[0], center[1]],
+                    #     radius=radius,
+                    #     color=color,
+                    #     fill=True,
+                    #     fill_color=color,
+                    #     fill_opacity=0.1,
+                    #     weight=2
+                    # ).add_to(m)
                     
                     # Add cluster members
                     for idx in cluster_indices:
@@ -683,40 +683,3 @@ class VolunteerAssigner:
         print("Assignment pipeline completed successfully!")
         return True
 
-
-if __name__ == "__main__":
-    # Test the assigner
-    assigner = VolunteerAssigner(
-        use_clustering=True,
-        max_steps=40
-    )
-    
-    # Check if a trained agent exists, otherwise create a simple agent for testing
-    checkpoint_dir = "./checkpoints"
-    checkpoint_path = os.path.join(checkpoint_dir, "checkpoint_final")
-    
-    if not os.path.exists(checkpoint_path):
-        os.makedirs(checkpoint_dir, exist_ok=True)
-        
-        # Create a simple agent for testing
-        state_dim = assigner.env.observation_space.shape[0]
-        action_dim = assigner.env.action_space.n
-        
-        agent = ActorCriticAgent(state_dim, action_dim)
-        agent.save_models(checkpoint_path)
-    
-    # Generate assignments
-    assigner.load_agent(checkpoint_path)
-    assigner.generate_assignments()
-    
-    # Visualize
-    assigner.visualize_assignments()
-    # assigner.visualize_volunteer_load()
-    
-    # Generate and print report
-    report = assigner.generate_assignment_report()
-    print("\nAssignment Report:")
-    print(report)
-    
-    # Export to CSV
-    assigner.export_assignments_to_csv()

@@ -243,7 +243,7 @@ class DeliveryEnv(gym.Env):
         
         # Query the database for historical matches
         return self.db_handler.get_volunteer_historical_score(volunteer_id, recipient_id)
-    
+ 
     def _check_assignment_validity(self, volunteer_idx, recipient_idx):
         """
         Check if an assignment is valid.
@@ -398,160 +398,162 @@ class DeliveryEnv(gym.Env):
         # Convert to numpy array
         state = np.array(features, dtype=np.float32)
         return state
-    
+
+            
+
     def _compute_reward(self, volunteer_idx, recipient_idx):
-        """
-        Compute the reward for an assignment.
-        
-        Args:
-            volunteer_idx (int): Index of the volunteer
-            recipient_idx (int): Index of the recipient
-            
-        Returns:
-            reward (float): Reward for the assignment
-        """
+        # Reward Constants
+        HISTORICAL_MATCH_MAX = 3.0
+        PROXIMITY_MAX = 2.0
+        CLUSTER_DISTANCE_BONUS = 5.0
+        CLUSTER_DISTANCE_MODERATE = 2.0
+        CLUSTER_DISTANCE_PENALTY = -3.0
+        DIRECTION_BONUS_STRONG = 4.0
+        DIRECTION_BONUS_MODERATE = 2.0
+        DIRECTION_PENALTY_MODERATE = -2.0
+        DIRECTION_PENALTY_SEVERE = -5.0
+        CAPACITY_BONUS_PERFECT = 3.0
+        CAPACITY_BONUS_VERY_GOOD = 1.0
+        CAPACITY_BONUS_GOOD = 0.5
+        CAPACITY_PENALTY_OVERLOAD = -4.0
+        CLUSTER_TOGETHER_BONUS = 1.0
+        CLUSTER_SPLIT_PENALTY = -2.0
+
         reward = 0.0
-        
-        # 1. Historical match reward (0-3)
-        historical_score = self._get_historical_match_score(volunteer_idx, recipient_idx)
-        reward += historical_score
-        
-        # 2. Proximity rewards
-        # 2.1 Basic proximity to volunteer (0-2)
+
+        # ---------- [1] Historical Match ----------
+        reward += self._get_historical_match_score(volunteer_idx, recipient_idx)
+
+        # ---------- [1.5] Efficiency Evaluation ----------
+        reward += self._compute_volunteer_efficiency(volunteer_idx, recipient_idx)
+
+        # ---------- [2.1] Proximity to Volunteer ----------
         distance = self.distance_matrix[volunteer_idx, recipient_idx]
-        proximity_reward = max(0, 2 - (distance / 10))  # Decreases with distance
-        reward += proximity_reward
-        
-        # 2.2 Proximity to other recipients assigned to this volunteer
-        # This rewards keeping assigned recipients close to each other
-        assigned_recipients_to_volunteer = self.volunteer_assignments.get(volunteer_idx, [])
-        if assigned_recipients_to_volunteer:  # If this volunteer already has assignments
-            # Calculate average distance from this recipient to all other assigned recipients
-            recipient_distances = []
-            bearing_differences = []
-            
-            # Get volunteer coordinates
+        reward += max(0, PROXIMITY_MAX - (distance / 10))  # Linear decay
+
+        # ---------- [2.2] Proximity to Other Recipients ----------
+        assigned = self.volunteer_assignments.get(volunteer_idx, [])
+        if assigned:
             v_lat, v_lon = self.volunteers[volunteer_idx].latitude, self.volunteers[volunteer_idx].longitude
-            
-            # Calculate bearing from volunteer to this recipient
             r_lat, r_lon = self.recipients[recipient_idx].latitude, self.recipients[recipient_idx].longitude
             new_bearing = self._calculate_bearing(v_lat, v_lon, r_lat, r_lon)
-            
-            for other_r_idx in assigned_recipients_to_volunteer:
-                # Get coordinates
-                r1_lat, r1_lon = self.recipients[recipient_idx].latitude, self.recipients[recipient_idx].longitude
-                r2_lat, r2_lon = self.recipients[other_r_idx].latitude, self.recipients[other_r_idx].longitude
-                
-                # Calculate distance between recipients
-                dist = self._haversine_distance(r1_lat, r1_lon, r2_lat, r2_lon)
-                recipient_distances.append(dist)
-                
-                # Calculate bearing from volunteer to other recipient
-                other_bearing = self._calculate_bearing(v_lat, v_lon, r2_lat, r2_lon)
-                
-                # Calculate bearing difference
-                bearing_diff = self._bearing_difference(new_bearing, other_bearing)
-                bearing_differences.append(bearing_diff)
-            
-            # Average distance to other recipients
-            avg_distance = sum(recipient_distances) / len(recipient_distances) if recipient_distances else 0
-            
-            # Average bearing difference (lower is better - means recipients are in similar direction)
-            avg_bearing_diff = sum(bearing_differences) / len(bearing_differences) if bearing_differences else 0
-            
-            # 2.2.1 Distance-based clustering reward
-            if avg_distance > 5:  # More than 5km apart on average
-                # Severe penalty for very spread out recipients
-                cluster_penalty = -3.0 * (avg_distance / 5.0)  # Scales with distance
-                reward += cluster_penalty
-            elif avg_distance < 2:  # Less than 2km apart on average
-                # Bonus for very close recipients
-                reward += 5.0
+
+            distances, bearings = [], []
+            for other_idx in assigned:
+                o_lat, o_lon = self.recipients[other_idx].latitude, self.recipients[other_idx].longitude
+                distances.append(self._haversine_distance(r_lat, r_lon, o_lat, o_lon))
+                bearings.append(self._bearing_difference(new_bearing, self._calculate_bearing(v_lat, v_lon, o_lat, o_lon)))
+
+            avg_dist = sum(distances) / len(distances)
+            avg_bearing = sum(bearings) / len(bearings)
+
+            if avg_dist > 5:
+                reward += CLUSTER_DISTANCE_PENALTY * (avg_dist / 5.0)
+            elif avg_dist < 2:
+                reward += CLUSTER_DISTANCE_BONUS
             else:
-                # Reward for moderate distance
-                reward += 2.0
-                
-            # 2.2.2 Direction-based clustering reward
-            if avg_bearing_diff < 30:  # Recipients are in a similar direction (within 30 degrees)
-                # Strong bonus for directional consistency
-                direction_bonus = 4.0
-                reward += direction_bonus
-            elif avg_bearing_diff < 45:  # Recipients are in similar but not opposite directions
-                # Moderate bonus for similar direction
-                direction_bonus = 2.0
-                reward += direction_bonus
-            elif avg_bearing_diff > 120:  # Recipients are in opposite directions (>120 degrees apart)
-                # Severe penalty for opposite directions (requires backtracking)
-                direction_penalty = -5.0
-                reward += direction_penalty
-            elif avg_bearing_diff > 90:  # Recipients are in significantly different directions
-                # Moderate penalty for different directions
-                direction_penalty = -2.0
-                reward += direction_penalty
-        
-        # 3. Capacity compatibility reward
+                reward += CLUSTER_DISTANCE_MODERATE
+
+            if avg_bearing < 30:
+                reward += DIRECTION_BONUS_STRONG
+            elif avg_bearing < 45:
+                reward += DIRECTION_BONUS_MODERATE
+            elif avg_bearing > 120:
+                reward += DIRECTION_PENALTY_SEVERE
+            elif avg_bearing > 90:
+                reward += DIRECTION_PENALTY_MODERATE
+
+        # ---------- [3] Capacity Compatibility ----------
         volunteer = self.volunteers[volunteer_idx]
         recipient = self.recipients[recipient_idx]
-        
-        current_load = sum(self.recipients[r_idx].num_items 
-                           for r_idx in self.volunteer_assignments.get(volunteer_idx, []))
+        current_load = sum(self.recipients[r].num_items for r in assigned)
         total_load = current_load + recipient.num_items
-        
-        # Calculate capacity ratio
         capacity_ratio = total_load / volunteer.car_size
-        
-        # Highly reward efficient capacity usage
+
         if 0.9 <= capacity_ratio <= 1.15:
-            # Perfect capacity utilization
-            reward += 3.0
+            reward += CAPACITY_BONUS_PERFECT
         elif 0.8 <= capacity_ratio < 0.9:
-            # Very good utilization
-            reward += 1.0
+            reward += CAPACITY_BONUS_VERY_GOOD
         elif 0.7 <= capacity_ratio < 0.8:
-            # Good utilization
-            reward += 0.5
+            reward += CAPACITY_BONUS_GOOD
         elif capacity_ratio > 1.0:
-            # Overcapacity: significant penalty
-            reward -= 4.0  # Scales with how much over capacity
-        # No penalty for low utilization - we don't want to discourage starting to use a volunteer
-        
-        # 4. Clustering reward/penalty
+            reward += CAPACITY_PENALTY_OVERLOAD
+
+        # ---------- [4] Clustering ----------
         if self.use_clustering:
-            # Get cluster label of the recipient
-            recipient_cluster = self.clusters['labels'][recipient_idx]
-            
-            # Check if other recipients from the same cluster are assigned to the same volunteer
-            if recipient_cluster != -1:  # Not noise
-                # Find other recipients in the same cluster
-                same_cluster_recipients = [
-                    i for i, label in enumerate(self.clusters['labels']) 
-                    if label == recipient_cluster
-                ]
-                
-                # Check if any are already assigned to this volunteer
-                assigned_to_volunteer = self.volunteer_assignments.get(volunteer_idx, [])
-                
-                cluster_match = any(r_idx in assigned_to_volunteer for r_idx in same_cluster_recipients)
-                
-                
-                if cluster_match:
-                    reward += 1.0  # Bonus for keeping cluster together
+            cluster = self.clusters['labels'][recipient_idx]
+            if cluster != -1:
+                same_cluster = [i for i, c in enumerate(self.clusters['labels']) if c == cluster]
+                assigned_to_v = set(assigned)
+                if any(r in assigned_to_v for r in same_cluster):
+                    reward += CLUSTER_TOGETHER_BONUS
                 else:
-                    # Check if cluster is split across volunteers
-                    for other_v_idx, other_assigned in self.volunteer_assignments.items():
-                        if other_v_idx != volunteer_idx:
-                            # Check ratio of taken capacity is already assigned to this volunteer and other
-                            volunteer_util = sum(self.recipients[r_idx].num_items for r_idx in assigned_to_volunteer) / self.volunteers[volunteer_idx].car_size
-                            other_util = sum(self.recipients[r_idx].num_items for r_idx in other_assigned) / self.volunteers[other_v_idx].car_size
-                            
-                            # Check if any recipients from the same cluster are assigned to this volunteer and the car size ratio of both is less than 0.8
-                            if any(r_idx in other_assigned for r_idx in same_cluster_recipients) and (volunteer_util < 0.8 and other_util < 0.8):
-                                reward -= 2.0  # Penalty for splitting cluster
-                                break
-                            
-        
+                    for v_idx, v_assigned in self.volunteer_assignments.items():
+                        if v_idx != volunteer_idx:
+                            if any(r in v_assigned for r in same_cluster):
+                                util_1 = current_load / volunteer.car_size
+                                util_2 = sum(self.recipients[r].num_items for r in v_assigned) / self.volunteers[v_idx].car_size
+                                if util_1 < 0.8 and util_2 < 0.8:
+                                    reward += CLUSTER_SPLIT_PENALTY
+                                    break
+
         return reward
-    
+
+    def _compute_volunteer_efficiency(self, volunteer_idx, recipient_idx):
+        # Reward Constants
+        EFFICIENCY_PENALTY = -4.0
+        EFFICIENCY_BONUS = 1.0
+
+        recipient = self.recipients[recipient_idx]
+        chosen_vol = self.volunteers[volunteer_idx]
+        chosen_dist = self.distance_matrix[volunteer_idx, recipient_idx]
+
+        better = []
+        for v_idx in range(self.num_volunteers):
+            if v_idx == volunteer_idx:
+                continue
+            vol = self.volunteers[v_idx]
+            load = sum(self.recipients[r].num_items for r in self.volunteer_assignments.get(v_idx, []))
+            if vol.car_size - load >= recipient.num_items:
+                dist = self.distance_matrix[v_idx, recipient_idx]
+                if dist < chosen_dist * 0.8:
+                    better.append((v_idx, dist, vol.car_size - load))
+
+        if better:
+            better.sort(key=lambda x: x[1])  # Closest first
+            for v_idx, dist, capacity in better[:3]:
+                near = []
+                for r_idx in range(self.num_recipients):
+                    if r_idx == recipient_idx or r_idx in self.assigned_recipients:
+                        continue
+                    dist_r = self._haversine_distance(
+                        recipient.latitude, recipient.longitude,
+                        self.recipients[r_idx].latitude, self.recipients[r_idx].longitude
+                    )
+                    if dist_r < 3.0 and capacity >= recipient.num_items + self.recipients[r_idx].num_items:
+                        near.append((r_idx, dist_r))
+
+                if near:
+                    v_lat, v_lon = self.volunteers[v_idx].latitude, self.volunteers[v_idx].longitude
+                    r_lat, r_lon = recipient.latitude, recipient.longitude
+                    main_bearing = self._calculate_bearing(v_lat, v_lon, r_lat, r_lon)
+
+                    consistent = all(
+                        self._bearing_difference(
+                            main_bearing,
+                            self._calculate_bearing(v_lat, v_lon, self.recipients[r].latitude, self.recipients[r].longitude)
+                        ) <= 45 for r, _ in near
+                    )
+
+                    if consistent and len(near) >= 2:
+                        return EFFICIENCY_PENALTY  # Strong penalty
+                    elif consistent:
+                        return EFFICIENCY_PENALTY / 2  # Moderate penalty
+
+            return -1.0  # Mild penalty
+
+        return EFFICIENCY_BONUS
+
     def step(self, action):
         """
         Take a step in the environment.

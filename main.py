@@ -126,8 +126,8 @@ def train_agent(args):
     max_steps = 60
 
     # Create environment
-    env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=True, cluster_eps=0.00005)
-    
+    env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=False, cluster_eps=0.00005)
+
     # Create trainer
     trainer = AgentTrainer(
         state_dim=env.observation_space.shape[0],
@@ -138,16 +138,40 @@ def train_agent(args):
         critic_lr=0.0002,
         gamma=0.95
     )
+
     
     # Training loop
     stats = trainer.train(
         env=env,
-        num_episodes=500,
+        num_episodes=1503,
         max_steps=max_steps,
         print_interval=10,
-        checkpoint_interval=100,
-        agent_num_updates=10
+        checkpoint_interval=503,
+        agent_num_updates=3
     )
+    
+    # # Create environment
+    # env2 = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=True, cluster_eps=0.00005)
+    
+    # # Create trainer
+    # trainer2 = AgentTrainer(
+    #     state_dim=env.observation_space.shape[0],
+    #     action_dim=env.action_space.n,
+    #     db_handler=db_handler,
+    #     device="cuda" if torch.cuda.is_available() else "cpu",
+    #     actor_lr=0.0001,
+    #     critic_lr=0.0002,
+    #     gamma=0.95
+    # )
+    # # Training loop
+    # stats2 = trainer2.train(
+    #     env=env2,
+    #     num_episodes=502,
+    #     max_steps=max_steps,
+    #     print_interval=10,
+    #     checkpoint_interval=1000,
+    #     agent_num_updates=10
+    # )
     
     print("Training complete!")
 
@@ -164,7 +188,8 @@ def run_pipeline(args):
     success = assigner.run_complete_pipeline(
         export_csv=True,
         save_visualizations=True,
-        save_report=True
+        save_report=True,
+        agent_path='./checkpoints/checkpoint_final'
     )
     
     if success:
