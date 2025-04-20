@@ -145,7 +145,7 @@ class DeliveryEnv(gym.Env):
         Returns:
             distance (float): Distance between the points in kilometers
         """
-        # Convert decimal degrees to radians
+        # Convert latitude and longitude from degrees to radians
         lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
         
         # Haversine formula
@@ -156,6 +156,47 @@ class DeliveryEnv(gym.Env):
         r = 6371  # Radius of Earth in kilometers
         
         return c * r
+        
+    def _calculate_bearing(self, lat1, lon1, lat2, lon2):
+        """
+        Calculate the bearing (direction) from point 1 to point 2.
+        
+        Args:
+            lat1, lon1: Coordinates of the first point (degrees)
+            lat2, lon2: Coordinates of the second point (degrees)
+            
+        Returns:
+            bearing (float): Bearing in degrees (0-360, where 0 is North)
+        """
+        # Convert latitude and longitude from degrees to radians
+        lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
+        
+        # Calculate bearing
+        dlon = lon2 - lon1
+        y = np.sin(dlon) * np.cos(lat2)
+        x = np.cos(lat1) * np.sin(lat2) - np.sin(lat1) * np.cos(lat2) * np.cos(dlon)
+        bearing_rad = np.arctan2(y, x)
+        
+        # Convert to degrees and normalize to 0-360
+        bearing_deg = np.degrees(bearing_rad)
+        bearing_deg = (bearing_deg + 360) % 360
+        
+        return bearing_deg
+        
+    def _bearing_difference(self, bearing1, bearing2):
+        """
+        Calculate the absolute difference between two bearings, accounting for circularity.
+        
+        Args:
+            bearing1, bearing2: Bearings in degrees (0-360)
+            
+        Returns:
+            difference (float): Absolute difference in degrees (0-180)
+        """
+        diff = abs(bearing1 - bearing2) % 360
+        if diff > 180:
+            diff = 360 - diff
+        return diff
     
     def _decode_action(self, action):
         """
@@ -375,35 +416,104 @@ class DeliveryEnv(gym.Env):
         historical_score = self._get_historical_match_score(volunteer_idx, recipient_idx)
         reward += historical_score
         
-        # 2. Proximity reward (0-2)
+        # 2. Proximity rewards
+        # 2.1 Basic proximity to volunteer (0-2)
         distance = self.distance_matrix[volunteer_idx, recipient_idx]
         proximity_reward = max(0, 2 - (distance / 10))  # Decreases with distance
         reward += proximity_reward
+        
+        # 2.2 Proximity to other recipients assigned to this volunteer
+        # This rewards keeping assigned recipients close to each other
+        assigned_recipients_to_volunteer = self.volunteer_assignments.get(volunteer_idx, [])
+        if assigned_recipients_to_volunteer:  # If this volunteer already has assignments
+            # Calculate average distance from this recipient to all other assigned recipients
+            recipient_distances = []
+            bearing_differences = []
+            
+            # Get volunteer coordinates
+            v_lat, v_lon = self.volunteers[volunteer_idx].latitude, self.volunteers[volunteer_idx].longitude
+            
+            # Calculate bearing from volunteer to this recipient
+            r_lat, r_lon = self.recipients[recipient_idx].latitude, self.recipients[recipient_idx].longitude
+            new_bearing = self._calculate_bearing(v_lat, v_lon, r_lat, r_lon)
+            
+            for other_r_idx in assigned_recipients_to_volunteer:
+                # Get coordinates
+                r1_lat, r1_lon = self.recipients[recipient_idx].latitude, self.recipients[recipient_idx].longitude
+                r2_lat, r2_lon = self.recipients[other_r_idx].latitude, self.recipients[other_r_idx].longitude
+                
+                # Calculate distance between recipients
+                dist = self._haversine_distance(r1_lat, r1_lon, r2_lat, r2_lon)
+                recipient_distances.append(dist)
+                
+                # Calculate bearing from volunteer to other recipient
+                other_bearing = self._calculate_bearing(v_lat, v_lon, r2_lat, r2_lon)
+                
+                # Calculate bearing difference
+                bearing_diff = self._bearing_difference(new_bearing, other_bearing)
+                bearing_differences.append(bearing_diff)
+            
+            # Average distance to other recipients
+            avg_distance = sum(recipient_distances) / len(recipient_distances) if recipient_distances else 0
+            
+            # Average bearing difference (lower is better - means recipients are in similar direction)
+            avg_bearing_diff = sum(bearing_differences) / len(bearing_differences) if bearing_differences else 0
+            
+            # 2.2.1 Distance-based clustering reward
+            if avg_distance > 5:  # More than 5km apart on average
+                # Severe penalty for very spread out recipients
+                cluster_penalty = -3.0 * (avg_distance / 5.0)  # Scales with distance
+                reward += cluster_penalty
+            elif avg_distance < 2:  # Less than 2km apart on average
+                # Bonus for very close recipients
+                reward += 5.0
+            else:
+                # Reward for moderate distance
+                reward += 2.0
+                
+            # 2.2.2 Direction-based clustering reward
+            if avg_bearing_diff < 30:  # Recipients are in a similar direction (within 30 degrees)
+                # Strong bonus for directional consistency
+                direction_bonus = 4.0
+                reward += direction_bonus
+            elif avg_bearing_diff < 45:  # Recipients are in similar but not opposite directions
+                # Moderate bonus for similar direction
+                direction_bonus = 2.0
+                reward += direction_bonus
+            elif avg_bearing_diff > 120:  # Recipients are in opposite directions (>120 degrees apart)
+                # Severe penalty for opposite directions (requires backtracking)
+                direction_penalty = -5.0
+                reward += direction_penalty
+            elif avg_bearing_diff > 90:  # Recipients are in significantly different directions
+                # Moderate penalty for different directions
+                direction_penalty = -2.0
+                reward += direction_penalty
         
         # 3. Capacity compatibility reward
         volunteer = self.volunteers[volunteer_idx]
         recipient = self.recipients[recipient_idx]
         
         current_load = sum(self.recipients[r_idx].num_items 
-                          for r_idx in self.volunteer_assignments.get(volunteer_idx, []))
+                           for r_idx in self.volunteer_assignments.get(volunteer_idx, []))
         total_load = current_load + recipient.num_items
         
-        # Perfect match: between 80% and 100% of capacity
+        # Calculate capacity ratio
         capacity_ratio = total_load / volunteer.car_size
-        if 0.8 <= capacity_ratio <= 1.0:
-            reward += 2.0
-        # Good match: between 60% and 80% of capacity
-        elif 0.6 <= capacity_ratio < 0.8:
+        
+        # Highly reward efficient capacity usage
+        if 0.9 <= capacity_ratio <= 1.15:
+            # Perfect capacity utilization
+            reward += 3.0
+        elif 0.8 <= capacity_ratio < 0.9:
+            # Very good utilization
             reward += 1.0
-        # Over capacity: between 100% and 110% of capacity
-        elif 1.0 <= capacity_ratio < 1.1:
-            reward += 0.0
-        # Overcapacity: penalize
+        elif 0.7 <= capacity_ratio < 0.8:
+            # Good utilization
+            reward += 0.5
         elif capacity_ratio > 1.0:
-            reward -= 3.0
-        # Undercapacity: small penalty for wasted space
-        elif capacity_ratio < 0.5:
-            reward -= 1.0
+            # Overcapacity: significant penalty
+            reward -= 4.0  # Scales with how much over capacity
+        # No penalty for low utilization - we don't want to discourage starting to use a volunteer
         
         # 4. Clustering reward/penalty
         if self.use_clustering:
@@ -520,11 +630,80 @@ class DeliveryEnv(gym.Env):
         if not valid_actions_exist or self.current_step >= self.max_steps:
             done = True
 
-        # At episode end, penalize for unassigned recipients
+        # At episode end, calculate final rewards
         if done:
+            # 1. Penalize for unassigned recipients
             num_unassigned = self.num_recipients - len(self.assigned_recipients)
-            end_penalty = -2.0 * num_unassigned
-            reward += end_penalty
+            unassigned_penalty = -5.0 * num_unassigned  # Increased penalty for unassigned recipients
+            reward += unassigned_penalty
+            
+            # 2. Reward for efficient volunteer usage
+            if len(self.assigned_recipients) > 0:  # Only if we've made some assignments
+                # Count active volunteers (those with at least one assignment)
+                active_volunteers = len(self.volunteer_assignments)
+                
+                # Calculate average capacity utilization for active volunteers
+                total_utilization = 0.0
+                high_utilization_count = 0
+                
+                for v_idx, r_indices in self.volunteer_assignments.items():
+                    volunteer = self.volunteers[v_idx]
+                    current_load = sum(self.recipients[r_idx].num_items for r_idx in r_indices)
+                    utilization = current_load / volunteer.car_size
+                    total_utilization += utilization
+                    
+                    # Count volunteers with high utilization (>80%)
+                    if utilization >= 0.9:
+                        high_utilization_count += 1
+                
+                # Average utilization across active volunteers
+                avg_utilization = total_utilization / active_volunteers if active_volunteers > 0 else 0
+                
+                # Reward based on percentage of volunteers with high utilization
+                high_util_percentage = high_utilization_count / active_volunteers if active_volunteers > 0 else 0
+                high_util_reward = 10.0 * high_util_percentage
+                
+                # Reward for using fewer volunteers (relative to total recipients)
+                volunteer_efficiency = 1.0 - (active_volunteers / self.num_volunteers)
+                volunteer_count_reward = 5.0 * volunteer_efficiency
+                
+                # 3. Route efficiency reward - evaluate geographical compactness of routes
+                route_efficiency_reward = 0.0
+                
+                for v_idx, r_indices in self.volunteer_assignments.items():
+                    if len(r_indices) <= 1:  # Skip volunteers with 0 or 1 recipient
+                        continue
+                        
+                    # Calculate all pairwise distances between assigned recipients
+                    all_distances = []
+                    for i, r1_idx in enumerate(r_indices):
+                        r1_lat, r1_lon = self.recipients[r1_idx].latitude, self.recipients[r1_idx].longitude
+                        
+                        for r2_idx in r_indices[i+1:]:
+                            r2_lat, r2_lon = self.recipients[r2_idx].latitude, self.recipients[r2_idx].longitude
+                            dist = self._haversine_distance(r1_lat, r1_lon, r2_lat, r2_lon)
+                            all_distances.append(dist)
+                    
+                    # Calculate route compactness metrics
+                    if all_distances:
+                        avg_distance = sum(all_distances) / len(all_distances)
+                        max_distance = max(all_distances) if all_distances else 0
+                        
+                        # Reward compact routes, penalize spread out routes
+                        if avg_distance < 2:  # Very compact route (< 3km between stops on average)
+                            route_efficiency_reward += 3.0
+                        elif avg_distance < 4:  # Reasonably compact route
+                            route_efficiency_reward += 1.5
+                        elif avg_distance > 10:  # Very spread out route
+                            route_efficiency_reward -= 2.0 * (avg_distance / 10.0)  # Scales with distance
+                        
+                        # Extra penalty for routes with any very distant points
+                        if max_distance > 15:  # Any stops more than 15km apart
+                            route_efficiency_reward -= 3.0
+                
+                # Add all rewards
+                efficiency_reward = high_util_reward + volunteer_count_reward + route_efficiency_reward
+                reward += efficiency_reward
 
         # Debug logging
         # print(f"\n[DEBUG] Step: {self.current_step}")

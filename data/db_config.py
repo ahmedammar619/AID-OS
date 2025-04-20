@@ -19,7 +19,7 @@ test_volunteers = [
     Volunteer(i,
         34.00  + random.uniform(-0.1,0.1),
         -118.25 + random.uniform(-0.1,0.1),
-        random.choice([5, 8, 10, 12, 15, 20])
+        random.choice([6, 8, 10, 12, 15, 20])
     )
     for i in range(1,21)
 ]
