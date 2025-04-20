@@ -81,42 +81,26 @@ class Actor(nn.Module):
             action_probs = self.forward(state)
         
         if env:
-            # Create mask for valid actions
+            # Strict masking for valid actions
             action_mask = torch.zeros_like(action_probs)
             num_recipients = env.num_recipients
-            
             for action in range(action_probs.size(1)):
                 volunteer_idx = action // num_recipients
                 recipient_idx = action % num_recipients
-                
-                # Check if recipient is already assigned
-                if recipient_idx not in env.assigned_recipients:
+                # Use environment's validity check
+                if env._check_assignment_validity(volunteer_idx, recipient_idx):
                     action_mask[0, action] = 1
-                    continue
-
-                
-                # Check if assignment exceeds capacity
-                volunteer = env.volunteers[volunteer_idx]
-                recipient = env.recipients[recipient_idx]
-                current_load = sum(env.recipients[r_idx].num_items 
-                                for r_idx in env.volunteer_assignments.get(volunteer_idx, []))
-                if current_load + recipient.num_items <= volunteer.car_size+1:
-                    action_mask[0, action] = 1
-            
-            # If no valid actions, return a special termination action
+            # If no valid actions, return special invalid action
             if action_mask.sum() == 0:
-                return -1, 1.0  # Special termination action
-            
+                return -1, 1.0
             # Apply mask and normalize probabilities
             masked_probs = action_probs * action_mask
-            masked_probs = masked_probs / (masked_probs.sum() + 1e-8)  # Add small epsilon
-            
+            masked_probs = masked_probs / (masked_probs.sum() + 1e-8)
             if deterministic:
                 action = torch.argmax(masked_probs).item()
             else:
                 dist = torch.distributions.Categorical(masked_probs)
                 action = dist.sample().item()
-
             action_prob = masked_probs[0, action].item()
         else:
             if deterministic:

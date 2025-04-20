@@ -254,34 +254,34 @@ class AgentTrainer:
         plt.close()
 
 
-if __name__ == "__main__":
-    # Create database handler
-    db_handler = DatabaseHandler()
+# if __name__ == "__main__":
+#     # Create database handler
+#     db_handler = DatabaseHandler()
     
-    max_steps = 60
+#     max_steps = 60
 
-    # Create environment
-    env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=True, cluster_eps=0.00005)
+#     # Create environment
+#     env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=True, cluster_eps=0.00005)
     
-    # Create trainer
-    trainer = AgentTrainer(
-        state_dim=env.observation_space.shape[0],
-        action_dim=env.action_space.n,
-        db_handler=db_handler,
-        device="cuda" if torch.cuda.is_available() else "cpu",
-        actor_lr=0.0001,
-        critic_lr=0.0002,
-        gamma=0.95
-    )
+#     # Create trainer
+#     trainer = AgentTrainer(
+#         state_dim=env.observation_space.shape[0],
+#         action_dim=env.action_space.n,
+#         db_handler=db_handler,
+#         device="cuda" if torch.cuda.is_available() else "cpu",
+#         actor_lr=0.0001,
+#         critic_lr=0.0002,
+#         gamma=0.95
+#     )
     
-    # Training loop
-    stats = trainer.train(
-        env=env,
-        num_episodes=51,
-        max_steps=max_steps,
-        print_interval=10,
-        checkpoint_interval=500,
-        agent_num_updates=10
-    )
+#     # Training loop
+#     stats = trainer.train(
+#         env=env,
+#         num_episodes=51,
+#         max_steps=max_steps,
+#         print_interval=10,
+#         checkpoint_interval=500,
+#         agent_num_updates=10
+#     )
     
-    print("Training complete!")
+#     print("Training complete!")

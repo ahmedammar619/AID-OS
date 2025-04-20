@@ -442,26 +442,6 @@ class DeliveryEnv(gym.Env):
         
         return reward
     
-    def reset(self):
-        """
-        Reset the environment to initial state.
-        
-        Returns:
-            state (numpy.ndarray): Initial state
-        """
-        # Reset step counter
-        self.current_step = 0
-        
-        # Reset assignments
-        self.assignment_list = []
-        self.assigned_recipients = set()
-        self.volunteer_assignments = {}  # Maps volunteer_idx -> list of recipient_idx
-        
-        # Compute initial state
-        self.state = self._compute_state()
-        
-        return self.state
-    
     def step(self, action):
         """
         Take a step in the environment.
@@ -483,9 +463,23 @@ class DeliveryEnv(gym.Env):
         
         # Initialize reward
         reward = 0.0
-        
+        assignment_reward = 0.0
+        step_penalty = -0.1
+        invalid_action_penalty = 0.0
+        end_penalty = 0.0
 
-        # Update assignments
+        if not valid_action:
+            print(f"[DEBUG] Invalid action: Volunteer {volunteer_idx}, Recipient {recipient_idx}. Ending episode.")
+            info = {
+                'valid_action': False,
+                'volunteer_idx': volunteer_idx,
+                'recipient_idx': recipient_idx,
+                'assigned_count': len(self.assigned_recipients),
+                'total_recipients': self.num_recipients
+            }
+            return self.state, -1.0, True, info
+
+        # Update assignments (only if valid)
         self.assignment_list.append((volunteer_idx, recipient_idx))
         self.assigned_recipients.add(recipient_idx)
         
@@ -494,15 +488,13 @@ class DeliveryEnv(gym.Env):
         self.volunteer_assignments[volunteer_idx].append(recipient_idx)
         
         # Compute reward for this assignment
-        reward = self._compute_reward(volunteer_idx, recipient_idx)
+        assignment_reward = self._compute_reward(volunteer_idx, recipient_idx)
+        reward += assignment_reward
 
         # Penalize every step
-        reward -= 0.1
+        reward += step_penalty
 
-        # Penalize if no recipient was assigned (invalid action)
-        if not valid_action:
-            reward -= 1.0
-
+        
         # Update state
         self.state = self._compute_state()
         
@@ -531,7 +523,23 @@ class DeliveryEnv(gym.Env):
         # At episode end, penalize for unassigned recipients
         if done:
             num_unassigned = self.num_recipients - len(self.assigned_recipients)
-            reward -= 2.0 * num_unassigned
+            end_penalty = -2.0 * num_unassigned
+            reward += end_penalty
+
+        # Debug logging
+        # print(f"\n[DEBUG] Step: {self.current_step}")
+        # print(f"  Action: Volunteer {volunteer_idx}, Recipient {recipient_idx}, Valid: {valid_action}")
+        # print(f"  Assignment reward: {assignment_reward:.2f}, Step penalty: {step_penalty:.2f}, Invalid action penalty: {invalid_action_penalty:.2f}, End penalty: {end_penalty:.2f}")
+        # print(f"  Total reward this step: {reward:.2f}")
+        # print(f"  Assigned recipients: {len(self.assigned_recipients)}/{self.num_recipients}")
+        # print(f"  Unassigned recipients: {self.num_recipients - len(self.assigned_recipients)}")
+        # if done:
+        #     if len(self.assigned_recipients) == self.num_recipients:
+        #         print("  [EPISODE END] All recipients assigned!")
+        #     elif self.current_step >= self.max_steps:
+        #         print("  [EPISODE END] Max steps reached.")
+        #     else:
+        #         print("  [EPISODE END] No valid actions left.")
 
         # Additional info
         info = {
@@ -544,6 +552,26 @@ class DeliveryEnv(gym.Env):
         
         return self.state, reward, done, info
     
+    def reset(self):
+        """
+        Reset the environment to initial state.
+        
+        Returns:
+            state (numpy.ndarray): Initial state
+        """
+        # Reset step counter
+        self.current_step = 0
+        
+        # Reset assignments
+        self.assignment_list = []
+        self.assigned_recipients = set()
+        self.volunteer_assignments = {}  # Maps volunteer_idx -> list of recipient_idx
+        
+        # Compute initial state
+        self.state = self._compute_state()
+        
+        return self.state
+
     def render(self, mode='human'):
         """
         Render the environment.

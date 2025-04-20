@@ -53,7 +53,7 @@ def setup_parser():
     
     # Run pipeline command
     pipeline_parser = subparsers.add_parser('pipeline', help='Run the complete pipeline')
-    pipeline_parser.add_argument('--agent', type=str, required=True, help='Path to trained agent checkpoint')
+    pipeline_parser.add_argument('--agent', type=str, help='Path to trained agent checkpoint')
     pipeline_parser.add_argument('--output-dir', type=str, default='./output', help='Directory to save output files')
     
     # Clustering command
@@ -152,10 +152,10 @@ def train_agent(args):
     # Training loop
     stats = trainer.train(
         env=env,
-        num_episodes=50,
+        num_episodes=500,
         max_steps=max_steps,
         print_interval=10,
-        checkpoint_interval=150,
+        checkpoint_interval=100,
         agent_num_updates=10
     )
     
@@ -213,7 +213,6 @@ def run_pipeline(args):
     
     # Run pipeline
     success = assigner.run_complete_pipeline(
-        agent_path=args.agent,
         export_csv=True,
         save_visualizations=True,
         save_report=True

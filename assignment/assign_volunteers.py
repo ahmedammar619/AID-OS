@@ -633,7 +633,7 @@ class VolunteerAssigner:
         print(f"Report saved to {filepath}")
         return filepath
     
-    def run_complete_pipeline(self, agent_path, export_csv=True, save_visualizations=True, save_report=True):
+    def run_complete_pipeline(self, agent_path='./checkpoints/checkpoint_final', export_csv=True, save_visualizations=True, save_report=True):
         """
         Run the complete assignment pipeline.
         
