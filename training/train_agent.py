@@ -127,8 +127,8 @@ class AgentTrainer:
                 
                 # Episode loop
                 for step in range(max_steps):
-                    # Select action
-                    action, _ = self.agent.select_action(state, env)
+                    # Select action (now returns action, prob, log_prob)
+                    action, prob, log_prob = self.agent.select_action(state, env)
                     
                     # Take step in environment
                     next_state, reward, done, info = env.step(action)
@@ -140,8 +140,8 @@ class AgentTrainer:
                     next_states.append(next_state)
                     dones.append(done)
                     
-                    # Update agent with new transition
-                    self.agent.store_transition(state, action, reward, next_state, done)
+                    # Update agent with new transition (now includes log_prob for PPO)
+                    self.agent.store_transition(state, action, reward, next_state, done, log_prob)
                     
                     # Update state and counters
                     state = next_state
