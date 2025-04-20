@@ -12,6 +12,7 @@ import sys
 import torch
 import numpy as np
 from datetime import datetime
+import random
 
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
@@ -70,15 +71,6 @@ def setup_parser():
     
     return parser
 
-
-# def initialize_database():
-#     """Initialize the database tables."""
-#     print("Initializing database...")
-#     db = DatabaseHandler()
-#     db.create_tables()
-#     print("Database tables created successfully!")
-
-
 def view_map(args):
     """View the recipient map."""
     
@@ -123,8 +115,6 @@ def view_map(args):
     )
     print("Map visualization complete!")
 
-    
-
 def train_agent(args):
     """Train the RL agent."""
     print("Training RL agent...")
@@ -161,52 +151,11 @@ def train_agent(args):
     
     print("Training complete!")
 
-
-
-# def generate_assignments(args):
-#     """Generate assignments using a trained agent."""
-#     print("Generating assignments...")
-    
-#     # Create assigner
-#     assigner = VolunteerAssigner()
-    
-#     # Load agent
-#     success = assigner.load_agent(args.agent)
-#     if not success:
-#         print("Failed to load agent!")
-#         return
-    
-#     # Generate assignments
-#     success = assigner.generate_assignments(deterministic=args.deterministic)
-#     if not success:
-#         print("Failed to generate assignments!")
-#         return
-    
-#     # Save to database
-#     assigner.save_assignments_to_db()
-    
-#     # Export to CSV if requested
-#     if args.export_csv:
-#         assigner.export_assignments_to_csv()
-    
-#     # Visualize if requested
-#     if args.visualize:
-#         assigner.visualize_assignments()
-#         assigner.visualize_volunteer_load()
-    
-#     # Generate and save report if requested
-#     if args.save_report:
-#         report = assigner.generate_assignment_report()
-#         assigner.save_report(report)
-#         print("\nAssignment Report:")
-#         print(report)
-    
-#     print("Assignment generation complete!")
-
-
 def run_pipeline(args):
     """Run the complete assignment pipeline."""
     print("Running complete assignment pipeline...")
+    import webbrowser
+    import glob
     
     # Create assigner
     assigner = VolunteerAssigner(output_dir=args.output_dir)
@@ -220,9 +169,19 @@ def run_pipeline(args):
     
     if success:
         print("Pipeline completed successfully!")
+        # Try to open the most recent assignment map or cluster map
+        output_dir = args.output_dir if hasattr(args, 'output_dir') else './output'
+        # Try assignment_map first, then cluster_map
+        html_files = sorted(glob.glob(os.path.join(output_dir, 'assignment_map_*.html')), reverse=True)
+        if not html_files:
+            html_files = sorted(glob.glob(os.path.join(output_dir, 'cluster_map.html')), reverse=True)
+        if html_files:
+            print(f"Opening map: {html_files[0]}")
+            webbrowser.open(f'file://{os.path.abspath(html_files[0])}')
+        else:
+            print("No map HTML file found to open.")
     else:
         print("Pipeline failed!")
-
 
 def handle_feedback(args):
     """Handle admin feedback."""
@@ -261,11 +220,23 @@ def handle_feedback(args):
     
     print("Feedback handling complete!")
 
+def set_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 
 def main():
     """Main function to parse arguments and run commands."""
     parser = setup_parser()
     args = parser.parse_args()
+    
+    # Set seed
+    set_seed(41)
     
     # Check if a command was provided
     if not args.command:
@@ -284,7 +255,6 @@ def main():
     else:
         print(f"Unknown command: {args.command}")
         parser.print_help()
-
 
 if __name__ == "__main__":
     main()
