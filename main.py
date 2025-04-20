@@ -126,7 +126,7 @@ def train_agent(args):
     max_steps = 60
 
     # Create environment
-    env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=False, cluster_eps=0.00005)
+    env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=True, cluster_eps=0.00005)
 
     # Create trainer
     trainer = AgentTrainer(
@@ -140,13 +140,13 @@ def train_agent(args):
     )
 
     
-    # Training loop
+    # Training loops
     stats = trainer.train(
         env=env,
-        num_episodes=1503,
+        num_episodes=4000,
         max_steps=max_steps,
         print_interval=10,
-        checkpoint_interval=503,
+        checkpoint_interval=1000,
         agent_num_updates=3
     )
     

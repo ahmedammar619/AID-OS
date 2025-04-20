@@ -227,22 +227,15 @@ class AgentTrainer:
     def plot_training_progress(self):
         """Plot and save training progress graphs."""
         # Create figure
-        fig, axes = plt.subplots(2, 1, figsize=(10, 12), sharex=True)
+        fig, axes = plt.subplots(1, 1, figsize=(10, 8), sharex=True)
         
         # Plot rewards
-        axes[0].plot(self.episode_rewards, label='Episode Reward', alpha=0.6)
-        axes[0].plot(self.avg_rewards, label='Avg Reward (100 ep)', linewidth=2)
-        axes[0].set_ylabel('Reward')
-        axes[0].set_title('Training Progress')
-        axes[0].legend()
-        axes[0].grid(True)
-        
-        # Plot episode lengths
-        axes[1].plot(self.episode_lengths)
-        axes[1].set_xlabel('Episode')
-        axes[1].set_ylabel('Length')
-        axes[1].set_title('Episode Lengths')
-        axes[1].grid(True)
+        axes.plot(self.episode_rewards, label='Episode Reward', alpha=0.6)
+        axes.plot(self.avg_rewards, label='Avg Reward (100 ep)', linewidth=2)
+        axes.set_ylabel('Reward')
+        axes.set_title('Training Progress')
+        axes.legend()
+        axes.grid(True)
         
         # Add timestamp
         plt.figtext(0.5, 0.01, f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',

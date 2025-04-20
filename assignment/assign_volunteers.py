@@ -225,6 +225,69 @@ class VolunteerAssigner:
         print(f"Assignments exported to {filepath}")
         return filepath
     
+    def _calculate_route_travel_time(self, volunteer_idx, recipient_indices):
+        """
+        Calculate the estimated travel time for a volunteer's route.
+        Assumes an average speed of 30 km/h in urban areas.
+        
+        Args:
+            volunteer_idx (int): Index of the volunteer
+            recipient_indices (list): List of recipient indices assigned to this volunteer
+            
+        Returns:
+            float: Estimated travel time in minutes
+            float: Total distance in kilometers
+        """
+        if not recipient_indices:
+            return 0, 0
+            
+        # Get coordinates
+        volunteer = self.env.volunteers[volunteer_idx]
+        v_lat, v_lon = volunteer.latitude, volunteer.longitude
+        
+        # We'll use a simple route: home -> all recipients -> back home
+        # In a real system, we would use a proper routing algorithm (TSP solution)
+        
+        # Sort recipients by distance from volunteer (greedy approach)
+        recipients_with_dist = []
+        for r_idx in recipient_indices:
+            recipient = self.env.recipients[r_idx]
+            r_lat, r_lon = recipient.latitude, recipient.longitude
+            dist = self.env._haversine_distance(v_lat, v_lon, r_lat, r_lon)
+            recipients_with_dist.append((r_idx, dist))
+        
+        # Sort by distance (closest first)
+        recipients_with_dist.sort(key=lambda x: x[1])
+        sorted_recipients = [r[0] for r in recipients_with_dist]
+        
+        # Calculate total route distance
+        total_distance = 0
+        current_lat, current_lon = v_lat, v_lon  # Start at volunteer's home
+        
+        # Visit each recipient
+        for r_idx in sorted_recipients:
+            recipient = self.env.recipients[r_idx]
+            r_lat, r_lon = recipient.latitude, recipient.longitude
+            
+            # Add distance to this recipient
+            dist = self.env._haversine_distance(current_lat, current_lon, r_lat, r_lon)
+            total_distance += dist
+            
+            # Update current position
+            current_lat, current_lon = r_lat, r_lon
+        
+        # Add distance back home
+        dist_back = self.env._haversine_distance(current_lat, current_lon, v_lat, v_lon)
+        total_distance += dist_back
+        
+        # Calculate time (assume average speed of 30 km/h in urban areas)
+        # Add 5 minutes per stop for delivery time
+        avg_speed_kmh = 30
+        stop_time_mins = 5 * len(sorted_recipients)
+        travel_time_mins = (total_distance / avg_speed_kmh) * 60 + stop_time_mins
+        
+        return travel_time_mins, total_distance
+    
     def visualize_assignments(self, save_path=None, show=True):
         """
         Visualize volunteer-recipient assignments using Leaflet
@@ -266,12 +329,21 @@ class VolunteerAssigner:
             total_boxes = sum(self.env.recipients[r].num_items for r in assigned_recipients)
             capacity = self.env.volunteers[i].car_size
             
+            # Calculate travel time and distance
+            travel_time, total_distance = self._calculate_route_travel_time(i, assigned_recipients)
+            
+            # Format travel time
+            hours = int(travel_time // 60)
+            minutes = int(travel_time % 60)
+            time_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+            
             # Build popup HTML
             popup_html = f"""
             <div style='width: 250px'>
                 <h4>Volunteer {i}</h4>
                 <p><b>Capacity:</b> {capacity} boxes</p>
                 <p><b>Used:</b> {total_boxes} boxes ({total_boxes/capacity*100:.1f}%)</p>
+                <p><b>Est. Travel:</b> {time_str} ({total_distance:.1f} km)</p>
                 
                 <h5>Recipients ({len(assigned_recipients)}):</h5>
                 <ul>
@@ -299,7 +371,7 @@ class VolunteerAssigner:
             folium.Marker(
                 [lat, lon],
                 icon=folium.Icon(color=color, icon='user', prefix='fa'),
-                tooltip=f'Volunteer {i} ({total_boxes}/{capacity} boxes) : (recipients:{len(assigned_recipients)})',
+                tooltip=f'Volunteer {i} ({total_boxes}/{capacity} boxes) : (recipients:{len(assigned_recipients)}) : (travel:{time_str}m ({total_distance:.1f}km))',
                 popup=folium.Popup(popup_html, max_width=300)
             ).add_to(m)
         
