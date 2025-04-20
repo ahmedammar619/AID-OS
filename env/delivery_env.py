@@ -416,7 +416,7 @@ class DeliveryEnv(gym.Env):
             'cluster_direction': 1.0,
             'capacity': 1.0,
             'cluster_membership': 1.0,
-            'time_efficiency': 1.0
+            'time_efficiency': 2.5  # Increased weight for time efficiency
         }
 
         reward = 0.0
@@ -516,16 +516,65 @@ class DeliveryEnv(gym.Env):
                                 reward += W['cluster_membership'] * -2.0
                                 break
 
-        # 7. Time-efficiency reward: closer recipients reduce travel time
-        # if assigned_recipients:
-        #     travel_time_penalty = 0.0
-        #     for other_r_idx in assigned_recipients:
-        #         r2_lat = self.recipients[other_r_idx].latitude
-        #         r2_lon = self.recipients[other_r_idx].longitude
-        #         dist = self._haversine_distance(r_lat, r_lon, r2_lat, r2_lon)
-        #         travel_time_penalty += dist
-        #     avg_time = travel_time_penalty / len(assigned_recipients)
-        #     reward += W['time_efficiency'] * (-avg_time / 5.0)  # Scaled penalty
+        # 7. Time-efficiency reward: calculate estimated travel time for the entire route
+        if assigned_recipients:
+            # Get volunteer coordinates
+            v_lat, v_lon = volunteer.latitude, volunteer.longitude
+            
+            # Get all recipients including the new one
+            all_recipients = assigned_recipients + [recipient_idx]
+            
+            # Calculate estimated route time using a greedy approach
+            # Start at volunteer's home
+            current_lat, current_lon = v_lat, v_lon
+            total_distance = 0
+            
+            # Sort recipients by distance from current position (greedy approach)
+            remaining_recipients = []
+            for r_idx in all_recipients:
+                r_lat = self.recipients[r_idx].latitude
+                r_lon = self.recipients[r_idx].longitude
+                dist = self._haversine_distance(current_lat, current_lon, r_lat, r_lon)
+                remaining_recipients.append((r_idx, dist))
+            
+            # Visit each recipient in order of proximity
+            while remaining_recipients:
+                # Find closest recipient
+                remaining_recipients.sort(key=lambda x: x[1])
+                next_r_idx, next_dist = remaining_recipients.pop(0)
+                
+                # Add distance to this recipient
+                total_distance += next_dist
+                
+                # Update current position
+                current_lat = self.recipients[next_r_idx].latitude
+                current_lon = self.recipients[next_r_idx].longitude
+                
+                # Update distances to remaining recipients
+                for i in range(len(remaining_recipients)):
+                    r_idx = remaining_recipients[i][0]
+                    r_lat = self.recipients[r_idx].latitude
+                    r_lon = self.recipients[r_idx].longitude
+                    dist = self._haversine_distance(current_lat, current_lon, r_lat, r_lon)
+                    remaining_recipients[i] = (r_idx, dist)
+            
+            # Add distance back to volunteer's home
+            dist_back = self._haversine_distance(current_lat, current_lon, v_lat, v_lon)
+            total_distance += dist_back
+            
+            # Calculate time (assume average speed of 30 km/h in urban areas)
+            # Add 5 minutes per stop for delivery time
+            avg_speed_kmh = 30
+            stop_time_mins = 5 * len(all_recipients)
+            travel_time_mins = (total_distance / avg_speed_kmh) * 60 + stop_time_mins
+            
+            # Convert to hours for scaling
+            travel_time_hours = travel_time_mins / 60
+            
+            # Apply time efficiency reward (penalize long routes)
+            # Scale: -1 point per hour of travel time
+            time_efficiency_reward = -travel_time_hours
+            reward += W['time_efficiency'] * time_efficiency_reward
 
         # Final: clip to avoid extreme values
         return np.clip(reward, REWARD_MIN, REWARD_MAX)
