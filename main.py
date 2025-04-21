@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-Main script for the AID-RL project.
+Main script for the AID-OS project.
 Provides a command-line interface to run the various components.
+Supports both Reinforcement Learning and Optimization-based approaches.
 """
 
 import argparse
@@ -24,11 +25,13 @@ from clustering.dbscan_cluster import RecipientClusterer
 from training.train_agent import AgentTrainer
 from feedback.feedback_handler import FeedbackHandler
 from assignment.assign_volunteers import VolunteerAssigner
+from assignment.assign_volunteers_opt import VolunteerAssignerOpt
+from optimization.solver import OptimizationSolver
 
 
 def setup_parser():
     """Set up command-line argument parser."""
-    parser = argparse.ArgumentParser(description='AID-RL: Volunteer Assignment Optimization with Reinforcement Learning')
+    parser = argparse.ArgumentParser(description='AID-OS: Volunteer Assignment Optimization System')
     
     # Add subparsers for different commands
     subparsers = parser.add_subparsers(dest='command', help='Command to run')
@@ -36,7 +39,7 @@ def setup_parser():
     # Initialize database command
     init_parser = subparsers.add_parser('init-db', help='Initialize database tables')
     
-    # Train command
+    # Train command (RL approach)
     train_parser = subparsers.add_parser('train', help='Train the RL agent')
     train_parser.add_argument('--episodes', type=int, default=500, help='Number of episodes to train for')
     train_parser.add_argument('--steps', type=int, default=200, help='Maximum steps per episode')
@@ -44,18 +47,34 @@ def setup_parser():
     train_parser.add_argument('--checkpoint-dir', type=str, default='./checkpoints', help='Directory to save checkpoints')
     train_parser.add_argument('--device', type=str, default='auto', help='Device to run on (cpu, cuda, auto)')
     
-    # Generate assignments command
-    assign_parser = subparsers.add_parser('assign', help='Generate assignments using trained agent')
+    # Generate assignments command (RL approach)
+    assign_parser = subparsers.add_parser('assign-rl', help='Generate assignments using trained RL agent')
     assign_parser.add_argument('--agent', type=str, required=True, help='Path to trained agent checkpoint')
     assign_parser.add_argument('--deterministic', action='store_true', help='Use deterministic policy')
     assign_parser.add_argument('--visualize', action='store_true', help='Visualize assignments')
     assign_parser.add_argument('--save-report', action='store_true', help='Save assignment report')
     assign_parser.add_argument('--export-csv', action='store_true', help='Export assignments to CSV')
     
-    # Run pipeline command
-    pipeline_parser = subparsers.add_parser('pipeline', help='Run the complete pipeline')
+    # Generate assignments command (Optimization approach)
+    assign_opt_parser = subparsers.add_parser('assign-opt', help='Generate assignments using optimization')
+    assign_opt_parser.add_argument('--visualize', action='store_true', help='Visualize assignments')
+    assign_opt_parser.add_argument('--save-report', action='store_true', help='Save assignment report')
+    assign_opt_parser.add_argument('--export-csv', action='store_true', help='Export assignments to CSV')
+    assign_opt_parser.add_argument('--output-dir', type=str, default='./output', help='Directory to save output files')
+    
+    # Run pipeline command (RL approach)
+    pipeline_parser = subparsers.add_parser('pipeline-rl', help='Run the complete RL pipeline')
     pipeline_parser.add_argument('--agent', type=str, help='Path to trained agent checkpoint')
     pipeline_parser.add_argument('--output-dir', type=str, default='./output', help='Directory to save output files')
+    
+    # Run pipeline command (Optimization approach)
+    pipeline_opt_parser = subparsers.add_parser('pipeline-opt', help='Run the complete optimization pipeline')
+    pipeline_opt_parser.add_argument('--output-dir', type=str, default='./output', help='Directory to save output files')
+    
+    # Compare approaches command
+    compare_parser = subparsers.add_parser('compare', help='Compare RL and optimization approaches')
+    compare_parser.add_argument('--agent', type=str, help='Path to trained agent checkpoint')
+    compare_parser.add_argument('--output-dir', type=str, default='./output', help='Directory to save output files')
     
     # Clustering command
     cluster_parser = subparsers.add_parser('map', help='Cluster recipients')
@@ -175,9 +194,9 @@ def train_agent(args):
     
     print("Training complete!")
 
-def run_pipeline(args):
-    """Run the complete assignment pipeline."""
-    print("Running complete assignment pipeline...")
+def run_pipeline_rl(args):
+    """Run the complete RL assignment pipeline."""
+    print("Running complete RL assignment pipeline...")
     import webbrowser
     import glob
     
@@ -189,11 +208,11 @@ def run_pipeline(args):
         export_csv=True,
         save_visualizations=True,
         save_report=True,
-        agent_path='./checkpoints/checkpoint_final'
+        agent_path='./checkpoints/checkpoint_final' if not hasattr(args, 'agent') or not args.agent else args.agent
     )
     
     if success:
-        print("Pipeline completed successfully!")
+        print("RL pipeline completed successfully!")
         # Try to open the most recent assignment map or cluster map
         output_dir = args.output_dir if hasattr(args, 'output_dir') else './output'
         # Try assignment_map first, then cluster_map
@@ -206,7 +225,39 @@ def run_pipeline(args):
         else:
             print("No map HTML file found to open.")
     else:
-        print("Pipeline failed!")
+        print("RL pipeline failed!")
+
+def run_pipeline_opt(args):
+    """Run the complete optimization assignment pipeline."""
+    print("Running complete optimization assignment pipeline...")
+    import webbrowser
+    import glob
+    
+    # Create assigner
+    assigner = VolunteerAssignerOpt(output_dir=args.output_dir)
+    
+    # Run pipeline
+    success = assigner.run_complete_pipeline(
+        export_csv=True,
+        save_visualizations=True,
+        save_report=True
+    )
+    
+    if success:
+        print("Optimization pipeline completed successfully!")
+        # Try to open the most recent assignment map or cluster map
+        output_dir = args.output_dir if hasattr(args, 'output_dir') else './output'
+        # Try assignment_map first, then cluster_map
+        html_files = sorted(glob.glob(os.path.join(output_dir, 'assignment_map_*.html')), reverse=True)
+        if not html_files:
+            html_files = sorted(glob.glob(os.path.join(output_dir, 'cluster_map.html')), reverse=True)
+        if html_files:
+            print(f"Opening map: {html_files[0]}")
+            webbrowser.open(f'file://{os.path.abspath(html_files[0])}')
+        else:
+            print("No map HTML file found to open.")
+    else:
+        print("Optimization pipeline failed!")
 
 def handle_feedback(args):
     """Handle admin feedback."""
@@ -255,6 +306,210 @@ def set_seed(seed):
 
 
 
+def assign_rl(args):
+    """Generate assignments using the RL approach."""
+    print("Generating assignments using RL...")
+    
+    # Create assigner
+    assigner = VolunteerAssigner(agent_path=args.agent)
+    
+    # Generate assignments
+    success = assigner.generate_assignments(deterministic=args.deterministic)
+    
+    if success:
+        print("Assignments generated successfully!")
+        
+        # Save to database
+        assigner.save_assignments_to_db()
+        
+        # Export to CSV if requested
+        if args.export_csv:
+            assigner.export_assignments_to_csv()
+        
+        # Visualize if requested
+        if args.visualize:
+            assigner.visualize_assignments()
+            assigner.visualize_volunteer_load()
+        
+        # Save report if requested
+        if args.save_report:
+            report = assigner.generate_assignment_report()
+            assigner.save_report(report)
+    else:
+        print("Failed to generate assignments!")
+
+def assign_opt(args):
+    """Generate assignments using the optimization approach."""
+    print("Generating assignments using optimization...")
+    
+    # Create assigner
+    assigner = VolunteerAssignerOpt(output_dir=args.output_dir)
+    
+    # Generate assignments
+    success = assigner.generate_assignments()
+    
+    if success:
+        print("Assignments generated successfully!")
+        
+        # Save to database
+        assigner.save_assignments_to_db()
+        
+        # Export to CSV if requested
+        if args.export_csv:
+            assigner.export_assignments_to_csv()
+        
+        # Visualize if requested
+        if args.visualize:
+            assigner.visualize_assignments()
+            assigner.visualize_volunteer_load()
+        
+        # Save report if requested
+        if args.save_report:
+            report = assigner.generate_assignment_report()
+            assigner.save_report(report)
+    else:
+        print("Failed to generate assignments!")
+
+def compare_approaches(args):
+    """Compare RL and optimization approaches."""
+    print("Comparing RL and optimization approaches...")
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    from datetime import datetime
+    
+    # Create output directory if it doesn't exist
+    output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Run RL pipeline
+    print("\n1. Running RL pipeline...")
+    rl_assigner = VolunteerAssigner(
+        agent_path=args.agent if hasattr(args, 'agent') and args.agent else './checkpoints/checkpoint_final',
+        output_dir=output_dir
+    )
+    rl_success = rl_assigner.generate_assignments(deterministic=True)
+    
+    if not rl_success:
+        print("RL pipeline failed! Cannot continue comparison.")
+        return
+    
+    # Export RL assignments
+    rl_csv_path = rl_assigner.export_assignments_to_csv(f"assignments_rl_{timestamp}.csv")
+    
+    # Run optimization pipeline
+    print("\n2. Running optimization pipeline...")
+    opt_assigner = VolunteerAssignerOpt(output_dir=output_dir)
+    opt_success = opt_assigner.generate_assignments()
+    
+    if not opt_success:
+        print("Optimization pipeline failed! Cannot continue comparison.")
+        return
+    
+    # Export optimization assignments
+    opt_csv_path = opt_assigner.export_assignments_to_csv(f"assignments_opt_{timestamp}.csv")
+    
+    # Load assignment data
+    rl_df = pd.read_csv(rl_csv_path)
+    opt_df = pd.read_csv(opt_csv_path)
+    
+    # Calculate metrics for comparison
+    rl_total_volunteers = len(rl_df['volunteer_id'].unique())
+    opt_total_volunteers = len(opt_df['volunteer_id'].unique())
+    
+    # Handle different column names in RL and optimization CSVs
+    rl_distance_col = 'distance' if 'distance' in rl_df.columns else 'distance_km'
+    opt_distance_col = 'distance_km' if 'distance_km' in opt_df.columns else 'distance'
+    
+    rl_total_distance = rl_df[rl_distance_col].sum()
+    opt_total_distance = opt_df[opt_distance_col].sum()
+    
+    rl_avg_distance = rl_df[rl_distance_col].mean()
+    opt_avg_distance = opt_df[opt_distance_col].mean()
+    
+    # Handle different column names for capacity and box counts
+    rl_capacity_col = 'volunteer_capacity' if 'volunteer_capacity' in rl_df.columns else 'volunteer_car_size'
+    rl_boxes_col = 'recipient_boxes' if 'recipient_boxes' in rl_df.columns else 'recipient_num_items'
+    
+    opt_capacity_col = 'volunteer_car_size' if 'volunteer_car_size' in opt_df.columns else 'volunteer_capacity'
+    opt_boxes_col = 'recipient_num_items' if 'recipient_num_items' in opt_df.columns else 'recipient_boxes'
+    
+    # Calculate utilization
+    rl_utilization = []
+    for vol_id in rl_df['volunteer_id'].unique():
+        vol_df = rl_df[rl_df['volunteer_id'] == vol_id]
+        capacity = vol_df[rl_capacity_col].iloc[0]
+        load = vol_df[rl_boxes_col].sum()
+        rl_utilization.append(load / capacity * 100)
+    
+    opt_utilization = []
+    for vol_id in opt_df['volunteer_id'].unique():
+        vol_df = opt_df[opt_df['volunteer_id'] == vol_id]
+        capacity = vol_df[opt_capacity_col].iloc[0]
+        load = vol_df[opt_boxes_col].sum()
+        opt_utilization.append(load / capacity * 100)
+    
+    rl_avg_utilization = sum(rl_utilization) / len(rl_utilization) if rl_utilization else 0
+    opt_avg_utilization = sum(opt_utilization) / len(opt_utilization) if opt_utilization else 0
+    
+    # Generate comparison report
+    report = "# RL vs. Optimization Comparison Report\n\n"
+    report += f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    
+    report += "## Summary Metrics\n\n"
+    report += "| Metric | RL Approach | Optimization Approach | Difference |\n"
+    report += "|--------|------------|----------------------|------------|\n"
+    report += f"| Total Volunteers | {rl_total_volunteers} | {opt_total_volunteers} | {opt_total_volunteers - rl_total_volunteers} |\n"
+    report += f"| Total Distance (km) | {rl_total_distance:.2f} | {opt_total_distance:.2f} | {opt_total_distance - rl_total_distance:.2f} |\n"
+    report += f"| Average Distance (km) | {rl_avg_distance:.2f} | {opt_avg_distance:.2f} | {opt_avg_distance - rl_avg_distance:.2f} |\n"
+    report += f"| Average Utilization (%) | {rl_avg_utilization:.2f} | {opt_avg_utilization:.2f} | {opt_avg_utilization - rl_avg_utilization:.2f} |\n\n"
+    
+    # Create visualizations
+    plt.figure(figsize=(12, 8))
+    
+    # 1. Volunteer count comparison
+    plt.subplot(2, 2, 1)
+    plt.bar(['RL', 'Optimization'], [rl_total_volunteers, opt_total_volunteers])
+    plt.title('Number of Volunteers Used')
+    plt.ylabel('Count')
+    
+    # 2. Total distance comparison
+    plt.subplot(2, 2, 2)
+    plt.bar(['RL', 'Optimization'], [rl_total_distance, opt_total_distance])
+    plt.title('Total Distance (km)')
+    plt.ylabel('Distance (km)')
+    
+    # 3. Average distance comparison
+    plt.subplot(2, 2, 3)
+    plt.bar(['RL', 'Optimization'], [rl_avg_distance, opt_avg_distance])
+    plt.title('Average Distance per Assignment (km)')
+    plt.ylabel('Distance (km)')
+    
+    # 4. Utilization comparison
+    plt.subplot(2, 2, 4)
+    plt.boxplot([rl_utilization, opt_utilization], labels=['RL', 'Optimization'])
+    plt.title('Volunteer Utilization (%)')
+    plt.ylabel('Utilization (%)')
+    
+    plt.tight_layout()
+    
+    # Save comparison plot
+    plot_path = os.path.join(output_dir, f"comparison_{timestamp}.png")
+    plt.savefig(plot_path)
+    plt.close()
+    
+    report += f"![Comparison Plot]({plot_path})\n\n"
+    
+    # Save report
+    report_path = os.path.join(output_dir, f"comparison_report_{timestamp}.md")
+    with open(report_path, 'w') as f:
+        f.write(report)
+    
+    print(f"\nComparison completed! Report saved to {report_path}")
+    print(f"Comparison plot saved to {plot_path}")
+
 def main():
     """Main function to parse arguments and run commands."""
     parser = setup_parser()
@@ -273,8 +528,16 @@ def main():
         view_map(args)
     elif args.command == 'train':
         train_agent(args)
-    elif args.command == 'pipeline':
-        run_pipeline(args)
+    elif args.command == 'assign-rl':
+        assign_rl(args)
+    elif args.command == 'assign-opt':
+        assign_opt(args)
+    elif args.command == 'pipeline-rl':
+        run_pipeline_rl(args)
+    elif args.command == 'pipeline-opt':
+        run_pipeline_opt(args)
+    elif args.command == 'compare':
+        compare_approaches(args)
     elif args.command == 'feedback':
         handle_feedback(args)
     else:
