@@ -132,7 +132,7 @@ AID-OS/
 
 ## RL vs. Optimization: Visual Comparison
 
-![Comparison of assignment results: RL vs. Optimization](output/comparison_20250421_001823.png)
+![Comparison of assignment results: RL vs. Optimization](comparison.png)
 *Comparison of assignment results between the RL and Optimization approaches. This image highlights differences in volunteer assignment efficiency, travel distance, and load distribution.*
 
 ---
