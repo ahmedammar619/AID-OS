@@ -143,7 +143,7 @@ def train_agent(args):
     # Training loops
     stats = trainer.train(
         env=env,
-        num_episodes=4000,
+        num_episodes=6000,
         max_steps=max_steps,
         print_interval=10,
         checkpoint_interval=1000,
