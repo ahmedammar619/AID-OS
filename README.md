@@ -1,18 +1,155 @@
-# Volunteer Assignment Optimization with Reinforcement Learning
+# Volunteer Assignment Optimization System
 
-## Project Description
+## Project Overview
 
-This project automates and optimizes the monthly assignment of volunteers to recipients for box deliveries. Each recipient may require multiple boxes, and each volunteer has a limited car capacity. The goal is to build an AI system that uses reinforcement learning to learn from past assignments and intelligently handle future ones based on:
+This project provides an end-to-end solution for automating and optimizing the monthly assignment of volunteers to recipients for box deliveries. The system has evolved from an initial Reinforcement Learning (RL) approach to a robust, scalable optimization-based method using Google OR-Tools. Both approaches are included for benchmarking, educational value, and transparency.
 
-- Location proximity and travel time optimization
-- Vehicle capacity utilization
-- Directional consistency for efficient routing
-- Historical volunteer–recipient pair preferences
-- Efficient grouping of nearby recipients using clustering (HDBSCAN)
-- Volunteer efficiency evaluation
-- Admin feedback on assignment quality
+### Why Two Approaches?
+- **Optimization Approach (Current, Preferred):**
+  - Uses Mixed-Integer Programming (MIP) via Google OR-Tools for globally optimal, deterministic assignments.
+  - Handles complex constraints (vehicle capacity, proximity, clustering, historical preferences) efficiently and transparently.
+  - Significantly outperforms RL in solution quality, speed, and maintainability for this use case.
+- **Reinforcement Learning (Legacy, Benchmark):**
+  - Actor-Critic RL agent learns assignment policies over time.
+  - Useful for research, experimentation, and understanding sequential decision-making.
+  - Retained for comparison and educational purposes.
 
-The system produces a final, optimized assignment of all recipients to volunteers once a month, with the option to run a second time after admin review.
+### When to Use Each Approach?
+- **Use Optimization** for production, real-world assignments, or when you need the best possible solution.
+- **Use RL** for experimentation, learning, or if you want to explore AI-based assignment strategies.
+
+---
+
+## Problem Statement
+
+Assign volunteers (with vehicle capacity limits and home locations) to recipients (with box requirements and geographic coordinates) such that:
+- All recipients are assigned
+- Volunteer travel is minimized
+- Vehicle capacity is not exceeded
+- Historical and admin preferences are respected
+- Geographic clustering is leveraged for efficiency
+
+---
+
+## System Architecture
+
+- **Optimization Solver:**
+  - Formulates the assignment as a MIP using Google OR-Tools
+  - Constraints: Each recipient assigned once, volunteer capacity, cluster cohesion, historical scores
+  - Objective: Minimize total distance, number of volunteers, and maximize preference/cluster bonuses
+
+- **RL Pipeline:**
+  - Custom Gym environment simulates assignment process
+  - Actor-Critic agent learns to assign volunteers to recipients
+  - Reward function encodes efficiency, proximity, capacity, and clustering
+
+- **Visualization & Reporting:**
+  - Folium maps, load distribution charts, and detailed markdown reports
+  - Comparison tools to benchmark RL vs. optimization
+
+---
+
+## Data Source
+
+- **Database:** MySQL (accessed via SQLAlchemy)
+- **Key Tables:**
+  - `volunteer`: volunteer_id, zip_code, car_size
+  - `recipient`: recipient_id, latitude, longitude, num_items
+  - `delivery_archive`: volunteer_id, recipient_id, timestamp
+
+---
+
+## How to Use
+
+1. **Install dependencies** (Python 3.10+ recommended):
+   ```bash
+   python3.10 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+2. **Initialize the database:**
+   ```bash
+   python main.py init-db
+   ```
+3. **Run the optimization pipeline:**
+   ```bash
+   python main.py pipeline-opt
+   ```
+4. **(Optional) Run the RL pipeline:**
+   ```bash
+   python main.py pipeline-rl
+   ```
+5. **Compare both approaches:**
+   ```bash
+   python main.py compare
+   ```
+6. **View outputs:**
+   - Assignments CSVs in `output/`
+   - Interactive maps and reports in `output/`
+
+---
+
+## Project Structure
+
+```bash
+AID-OS/
+├── assignment/                  # Volunteer assignment logic
+│   ├── assign_volunteers.py         # RL-based assignment
+│   └── assign_volunteers_opt.py     # Optimization-based assignment
+├── clustering/                  # Recipient clustering
+│   └── dbscan_cluster.py            # HDBSCAN clustering implementation
+├── data/                        # Data access and config
+│   ├── db_config.py                  # MySQL/DB connection config
+│   └── migrations/                    # (If present) DB migration scripts
+├── env/                         # RL environment
+│   └── delivery_env.py               # Custom Gym environment for RL
+├── feedback/                    # Admin/user feedback
+│   └── feedback_handler.py           # Feedback processing
+├── models/                      # RL agent models
+│   ├── actor.py                      # Actor network
+│   ├── critic.py                     # Critic network
+│   └── rl_agent.py                   # RL agent logic
+├── optimization/                # Optimization solver
+│   └── solver.py                     # Google OR-Tools solver
+├── output/                      # Outputs (assignments, reports, maps)
+├── training/                    # RL training scripts
+│   └── train_agent.py                # RL agent training loop
+├── main.py                      # CLI entry point
+├── requirements.txt             # Python dependencies
+└── README.md                    # Project documentation
+```
+
+---
+
+## Achievements
+- **Deterministic, optimal assignments** using mathematical optimization
+- **Legacy RL agent** for research and benchmarking
+- **Interactive visualizations** and detailed reporting
+- **Comprehensive comparison tools** for evaluating methods
+- **Scalable, maintainable codebase** ready for real-world deployment
+
+---
+
+## Future Directions
+- **Advanced route optimization** (TSP, time windows)
+- **Fairness & diversity metrics** for volunteer load balancing
+- **Multi-city scaling**
+- **Automated hyperparameter tuning**
+- **User/admin web dashboard**
+
+---
+
+## Rationale for Including RL
+
+While the optimization approach is now the primary method, the RL pipeline remains for:
+- **Educational value:** Demonstrates how RL can be applied to combinatorial assignment problems
+- **Benchmarking:** Quantitative comparison of AI vs. mathematical programming
+- **Research:** Platform for experimenting with new RL reward functions, state/action spaces, or hybrid approaches
+
+---
+
+## Contact
+For questions or collaborations, open an issue or contact the project lead via this repository.
 
 ---
 
