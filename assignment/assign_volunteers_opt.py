@@ -280,6 +280,40 @@ class VolunteerAssignerOpt:
                 contribution = self.recipients[r].num_items / self.volunteers[v].car_size
                 objective.SetCoefficient(x[v, r], capacity_util_weight * contribution)
         
+        # Minimize recipient distances from each other (compact routes)
+        recipient_distance_weight = 25.0
+        
+        # Pre-compute distances and filter only close pairs to significantly reduce problem size
+        close_recipient_pairs = []
+        for r1 in range(self.num_recipients):
+            for r2 in range(r1 + 1, self.num_recipients):
+                # Calculate distance between recipients
+                r1_lat, r1_lon = self.recipients[r1].latitude, self.recipients[r1].longitude
+                r2_lat, r2_lon = self.recipients[r2].latitude, self.recipients[r2].longitude
+                recip_distance = self._haversine_distance(r1_lat, r1_lon, r2_lat, r2_lon)
+                
+                # Only consider very close recipients
+                if recip_distance <= 5.0:  # Reduce threshold to 5 km
+                    close_recipient_pairs.append((r1, r2, recip_distance))
+        
+        # Limit the number of pairs to consider (take the closest N pairs)
+        max_pairs = min(500, len(close_recipient_pairs))  # Cap at 500 pairs
+        close_recipient_pairs.sort(key=lambda x: x[2])  # Sort by distance
+        close_recipient_pairs = close_recipient_pairs[:max_pairs]  # Take only the closest pairs
+        
+        # Only create variables for the filtered pairs
+        for v in range(min(10, self.num_volunteers)):  # Limit to top 10 volunteers
+            for r1, r2, recip_distance in close_recipient_pairs:
+                # Create auxiliary variable for when both recipients are assigned to same volunteer
+                z = solver.BoolVar(f'z_compact_{v}_{r1}_{r2}')
+                solver.Add(z <= x[v, r1])
+                solver.Add(z <= x[v, r2])
+                solver.Add(z >= x[v, r1] + x[v, r2] - 1)
+                
+                # Use negative coefficient to give preference to assigning close recipients together
+                # Scale inversely with distance so closer recipients get higher preference
+                objective.SetCoefficient(z, -recipient_distance_weight / (1.0 + recip_distance))
+        
         # Cluster bonuses
         if self.use_clustering:
             cluster_weight = -10.0
