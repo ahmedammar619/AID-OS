@@ -250,7 +250,7 @@ class VolunteerAssignerOpt:
         objective = solver.Objective()
         
         # Minimize total distance
-        distance_weight = 100.0
+        distance_weight = 10000.0
         for v in range(self.num_volunteers):
             for r in range(self.num_recipients):
                 objective.SetCoefficient(x[v, r], distance_weight * self.distance_matrix[v, r])
@@ -269,7 +269,7 @@ class VolunteerAssignerOpt:
                     objective.SetCoefficient(x[v, r], history_weight * historical_score)
         
         # Maximize volunteer capacity utilization
-        capacity_util_weight = -5.0  # Negative because we want to maximize utilization
+        capacity_util_weight = 30  # Negative because we want to maximize utilization
         for v in range(self.num_volunteers):
             # Create a capacity utilization term that rewards higher usage of available capacity
             used_capacity = sum(x[v, r] * self.recipients[r].num_items for r in range(self.num_recipients))
