@@ -304,8 +304,6 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-
-
 def assign_rl(args):
     """Generate assignments using the RL approach."""
     print("Generating assignments using RL...")
