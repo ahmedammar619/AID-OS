@@ -206,7 +206,7 @@ class VolunteerAssignerOpt:
         travel_time = (total_distance / 30.0) * 60.0 + len(recipient_indices) * 5.0
         return travel_time, total_distance
     
-    def _solve_optimization(self):
+    def generate_assignments(self):
         """
         Solve the volunteer-recipient assignment problem using OR-Tools MILP.
         
@@ -250,23 +250,35 @@ class VolunteerAssignerOpt:
         objective = solver.Objective()
         
         # Minimize total distance
-        distance_weight = 1.0
+        distance_weight = 100.0
         for v in range(self.num_volunteers):
             for r in range(self.num_recipients):
                 objective.SetCoefficient(x[v, r], distance_weight * self.distance_matrix[v, r])
         
         # Minimize number of volunteers
-        volunteer_weight = 50.0
+        volunteer_weight = -5.0
         for v in range(self.num_volunteers):
             objective.SetCoefficient(y[v], volunteer_weight)
         
         # Historical match bonuses
-        history_weight = -5.0
+        history_weight = 1.0
         for v in range(self.num_volunteers):
             for r in range(self.num_recipients):
                 historical_score = self._get_historical_match_score(v, r)
                 if historical_score > 0:
                     objective.SetCoefficient(x[v, r], history_weight * historical_score)
+        
+        # Maximize volunteer capacity utilization
+        capacity_util_weight = -5.0  # Negative because we want to maximize utilization
+        for v in range(self.num_volunteers):
+            # Create a capacity utilization term that rewards higher usage of available capacity
+            used_capacity = sum(x[v, r] * self.recipients[r].num_items for r in range(self.num_recipients))
+            # We can't directly add used_capacity/volunteer_capacity as a term, so we add each assignment
+            # with a coefficient proportional to the recipient's items and volunteer's capacity
+            for r in range(self.num_recipients):
+                # Weight each assignment by its contribution to capacity utilization
+                contribution = self.recipients[r].num_items / self.volunteers[v].car_size
+                objective.SetCoefficient(x[v, r], capacity_util_weight * contribution)
         
         # Cluster bonuses
         if self.use_clustering:
@@ -309,16 +321,7 @@ class VolunteerAssignerOpt:
             return True
         else:
             print("No solution found.")
-            return False
-    
-    def generate_assignments(self):
-        """
-        Generate volunteer-recipient assignments using optimization.
-        
-        Returns:
-            bool: Whether assignments were successfully generated.
-        """
-        return self._solve_optimization()
+            return False  
     
     def save_assignments_to_db(self):
         """
