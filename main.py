@@ -26,7 +26,6 @@ from training.train_agent import AgentTrainer
 from feedback.feedback_handler import FeedbackHandler
 from assignment.assign_volunteers import VolunteerAssigner
 from assignment.assign_volunteers_opt import VolunteerAssignerOpt
-from optimization.solver import OptimizationSolver
 
 
 def setup_parser():
@@ -44,7 +43,7 @@ def setup_parser():
     train_parser.add_argument('--episodes', type=int, default=500, help='Number of episodes to train for')
     train_parser.add_argument('--steps', type=int, default=200, help='Maximum steps per episode')
     train_parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
-    train_parser.add_argument('--checkpoint-dir', type=str, default='./checkpoints', help='Directory to save checkpoints')
+    train_parser.add_argument('--checkpoint-dir', type=str, default='./hist/checkpoints', help='Directory to save checkpoints')
     train_parser.add_argument('--device', type=str, default='auto', help='Device to run on (cpu, cuda, auto)')
     
     # Generate assignments command (RL approach)
@@ -60,21 +59,21 @@ def setup_parser():
     assign_opt_parser.add_argument('--visualize', action='store_true', help='Visualize assignments')
     assign_opt_parser.add_argument('--save-report', action='store_true', help='Save assignment report')
     assign_opt_parser.add_argument('--export-csv', action='store_true', help='Export assignments to CSV')
-    assign_opt_parser.add_argument('--output-dir', type=str, default='./output', help='Directory to save output files')
+    assign_opt_parser.add_argument('--output-dir', type=str, default='./hist/output', help='Directory to save output files')
     
     # Run pipeline command (RL approach)
     pipeline_parser = subparsers.add_parser('pipeline-rl', help='Run the complete RL pipeline')
     pipeline_parser.add_argument('--agent', type=str, help='Path to trained agent checkpoint')
-    pipeline_parser.add_argument('--output-dir', type=str, default='./output', help='Directory to save output files')
+    pipeline_parser.add_argument('--output-dir', type=str, default='./hist/output', help='Directory to save output files')
     
     # Run pipeline command (Optimization approach)
     pipeline_opt_parser = subparsers.add_parser('pipeline-opt', help='Run the complete optimization pipeline')
-    pipeline_opt_parser.add_argument('--output-dir', type=str, default='./output', help='Directory to save output files')
+    pipeline_opt_parser.add_argument('--output-dir', type=str, default='./hist/output', help='Directory to save output files')
     
     # Compare approaches command
     compare_parser = subparsers.add_parser('compare', help='Compare RL and optimization approaches')
     compare_parser.add_argument('--agent', type=str, help='Path to trained agent checkpoint')
-    compare_parser.add_argument('--output-dir', type=str, default='./output', help='Directory to save output files')
+    compare_parser.add_argument('--output-dir', type=str, default='./hist/output', help='Directory to save output files')
     
     # Clustering command
     cluster_parser = subparsers.add_parser('map', help='Cluster recipients')
@@ -123,7 +122,7 @@ def view_map(args):
     pickup_coords = np.array([[p.latitude, p.longitude] for p in pickups])
     
     # Visualize the clusters
-    output_path = os.path.join("./output", "cluster_map.html")
+    output_path = os.path.join("./hist/output", "cluster_map.html")
     clusterer.visualize_clusters(
         all_coords, 
         all_ids, 
@@ -208,13 +207,13 @@ def run_pipeline_rl(args):
         export_csv=True,
         save_visualizations=True,
         save_report=True,
-        agent_path='./checkpoints/checkpoint_final' if not hasattr(args, 'agent') or not args.agent else args.agent
+        agent_path='./hist/checkpoints/checkpoint_final' if not hasattr(args, 'agent') or not args.agent else args.agent
     )
     
     if success:
         print("RL pipeline completed successfully!")
         # Try to open the most recent assignment map or cluster map
-        output_dir = args.output_dir if hasattr(args, 'output_dir') else './output'
+        output_dir = args.output_dir if hasattr(args, 'output_dir') else './hist/output'
         # Try assignment_map first, then cluster_map
         html_files = sorted(glob.glob(os.path.join(output_dir, 'assignment_map_*.html')), reverse=True)
         if not html_files:
@@ -246,7 +245,7 @@ def run_pipeline_opt(args):
     if success:
         print("Optimization pipeline completed successfully!")
         # Try to open the most recent assignment map or cluster map
-        output_dir = args.output_dir if hasattr(args, 'output_dir') else './output'
+        output_dir = args.output_dir if hasattr(args, 'output_dir') else './hist/output'
         # Try assignment_map first, then cluster_map
         html_files = sorted(glob.glob(os.path.join(output_dir, 'assignment_map_*.html')), reverse=True)
         if not html_files:
@@ -282,7 +281,7 @@ def handle_feedback(args):
         
         # Save report
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filepath = os.path.join("./output", f"feedback_report_{timestamp}.md")
+        filepath = os.path.join("./hist/output", f"feedback_report_{timestamp}.md")
         
         with open(filepath, 'w') as f:
             f.write(report)
@@ -385,7 +384,7 @@ def compare_approaches(args):
     # Run RL pipeline
     print("\n1. Running RL pipeline...")
     rl_assigner = VolunteerAssigner(
-        agent_path=args.agent if hasattr(args, 'agent') and args.agent else './checkpoints/checkpoint_final',
+        agent_path=args.agent if hasattr(args, 'agent') and args.agent else './hist/checkpoints/checkpoint_final',
         output_dir=output_dir
     )
     rl_success = rl_assigner.generate_assignments(deterministic=True)

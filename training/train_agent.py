@@ -36,8 +36,8 @@ class AgentTrainer:
         critic_lr=0.002,
         gamma=0.99,
         device="cpu",
-        checkpoint_dir="./checkpoints",
-        log_dir="./logs"
+        checkpoint_dir="./hist/checkpoints",
+        log_dir="./hist/logs"
     ):
         """
         Initialize the trainer.

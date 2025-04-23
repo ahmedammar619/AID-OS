@@ -44,7 +44,7 @@ class VolunteerAssignerOpt:
         feedback_handler=None,
         use_clustering=True,
         cluster_eps=0.00005,
-        output_dir="./output"
+        output_dir="./hist/output"
     ):
         """
         Initialize the volunteer assigner.
@@ -58,7 +58,7 @@ class VolunteerAssignerOpt:
         """
         # Initialize handlers
         self.db_handler = db_handler if db_handler is not None else DatabaseHandler()
-        self.feedback_handler = feedback_handler if feedback_handler is not None else FeedbackHandler()
+        # self.feedback_handler = feedback_handler if feedback_handler is not None else FeedbackHandler()
         
         # Create output directory
         self.output_dir = output_dir

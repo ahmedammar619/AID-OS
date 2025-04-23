@@ -46,7 +46,7 @@ class VolunteerAssigner:
         use_clustering=True,
         cluster_eps=0.00005,
         max_steps=1000,
-        output_dir="./output"
+        output_dir="./hist/output"
     ):
         """
         Initialize the volunteer assigner.
@@ -705,7 +705,7 @@ class VolunteerAssigner:
         print(f"Report saved to {filepath}")
         return filepath
     
-    def run_complete_pipeline(self, agent_path='./checkpoints/checkpoint_final', export_csv=True, save_visualizations=True, save_report=True):
+    def run_complete_pipeline(self, agent_path='./hist/checkpoints/checkpoint_final', export_csv=True, save_visualizations=True, save_report=True):
         """
         Run the complete assignment pipeline.
         
