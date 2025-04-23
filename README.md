@@ -95,7 +95,7 @@ Assign volunteers (with vehicle capacity limits and home locations) to recipient
 AID-OS/
 ├── assignment/                  # Volunteer assignment logic
 │   ├── assign_volunteers.py         # RL-based assignment
-│   └── assign_volunteers_opt.py     # Optimization-based assignment
+│   └── assign_volunteers_opt.py     # Optimization-based assignment using Google OR-Tools 
 ├── clustering/                  # Recipient clustering
 │   └── dbscan_cluster.py            # HDBSCAN clustering implementation
 ├── data/                        # Data access and config
@@ -109,8 +109,6 @@ AID-OS/
 │   ├── actor.py                      # Actor network
 │   ├── critic.py                     # Critic network
 │   └── rl_agent.py                   # RL agent logic
-├── optimization/                # Optimization solver
-│   └── solver.py                     # Google OR-Tools solver
 ├── output/                      # Outputs (assignments, reports, maps)
 ├── training/                    # RL training scripts
 │   └── train_agent.py                # RL agent training loop
