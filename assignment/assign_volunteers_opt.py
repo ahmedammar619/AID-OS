@@ -249,87 +249,132 @@ class VolunteerAssignerOpt:
         # Objective function
         objective = solver.Objective()
         
-        # Minimize total distance
-        distance_weight = 10000.0
-        for v in range(self.num_volunteers):
-            for r in range(self.num_recipients):
-                objective.SetCoefficient(x[v, r], distance_weight * self.distance_matrix[v, r])
+        # Calculate normalization factors
+        print("Calculating normalization factors for objective terms...")
         
-        # Minimize number of volunteers
-        volunteer_weight = -5.0
-        for v in range(self.num_volunteers):
-            objective.SetCoefficient(y[v], volunteer_weight)
+        # For distance normalization
+        max_distance = max(max(row) for row in self.distance_matrix) if self.distance_matrix.size > 0 else 1.0
+        distance_norm = max_distance if max_distance > 0 else 1.0
+        print(f"Max distance: {max_distance:.2f} km (normalization factor)")
         
-        # Historical match bonuses
-        history_weight = 1.0
-        for v in range(self.num_volunteers):
-            for r in range(self.num_recipients):
-                historical_score = self._get_historical_match_score(v, r)
-                if historical_score > 0:
-                    objective.SetCoefficient(x[v, r], history_weight * historical_score)
+        # For capacity utilization normalization
+        max_capacity = max(v.car_size for v in self.volunteers) if self.volunteers else 1.0
+        max_items = max(r.num_items for r in self.recipients) if self.recipients else 1.0
+        capacity_norm = max_capacity if max_capacity > 0 else 1.0
+        print(f"Max capacity: {max_capacity} boxes (normalization factor)")
         
-        # Maximize volunteer capacity utilization
-        capacity_util_weight = 30  # Negative because we want to maximize utilization
-        for v in range(self.num_volunteers):
-            # Create a capacity utilization term that rewards higher usage of available capacity
-            used_capacity = sum(x[v, r] * self.recipients[r].num_items for r in range(self.num_recipients))
-            # We can't directly add used_capacity/volunteer_capacity as a term, so we add each assignment
-            # with a coefficient proportional to the recipient's items and volunteer's capacity
-            for r in range(self.num_recipients):
-                # Weight each assignment by its contribution to capacity utilization
-                contribution = self.recipients[r].num_items / self.volunteers[v].car_size
-                objective.SetCoefficient(x[v, r], capacity_util_weight * contribution)
+        # For historical matches normalization
+        max_history_score = 1.0  # Already normalized
+        
+        # For recipient distance normalization (used in compact routes)
+        recipient_distance_norm = 5.0  # The threshold we're already using
+        
+        # Define normalized weights (all on same scale: 0-100)
+        # Higher number means more importance
+        weights = {
+            'distance': 100.0,            # Minimize distance between volunteer and recipient
+            'volunteer_count': 0.0,     # Minimize total number of volunteers used
+            'capacity_util': 100000.0,       # Maximize capacity utilization
+            'history': 0.0,             # Prefer historical matches
+            'compact_routes': 0.0,      # Prefer recipients close to each other (compact routes)
+            'clusters': 0.0             # Prefer keeping clustered recipients together
+        }
+        print("Normalized weights (higher = more important):")
+        for key, value in weights.items():
+            print(f"  {key}: {value}")
+        
+        # Minimize total distance (volunteer to recipient)
+        if weights['distance']:
+            
+            for v in range(self.num_volunteers):
+                for r in range(self.num_recipients):
+                    # Normalize distance to 0-1 scale
+                    normalized_distance = self.distance_matrix[v, r] / distance_norm
+                    objective.SetCoefficient(x[v, r], weights['distance'] * normalized_distance)
+        
+        # Minimize number of volunteers (negative weight since we want to minimize)
+        if weights['volunteer_count']:
+            for v in range(self.num_volunteers):
+                objective.SetCoefficient(y[v], -weights['volunteer_count'])
+        
+        # Historical match bonuses (negative weight since we want to maximize)
+        if weights['history']:
+            for v in range(self.num_volunteers):
+                for r in range(self.num_recipients):
+                    historical_score = self._get_historical_match_score(v, r)
+                    if historical_score > 0:
+                        # historical_score is already normalized (0-3)
+                        normalized_history = historical_score / 3.0
+                        objective.SetCoefficient(x[v, r], -weights['history'] * normalized_history)
+        
+        # Maximize volunteer capacity utilization (negative weight since we want to maximize)
+        if weights['capacity_util']:
+            for v in range(self.num_volunteers):
+                for r in range(self.num_recipients):
+                    # Normalize the contribution to 0-1 scale
+                    contribution = self.recipients[r].num_items / self.volunteers[v].car_size
+                    normalized_contribution = min(1.0, contribution)  # Cap at 1.0
+                    objective.SetCoefficient(x[v, r], -weights['capacity_util'] * normalized_contribution)
         
         # Minimize recipient distances from each other (compact routes)
-        recipient_distance_weight = 25.0
-        
-        # Pre-compute distances and filter only close pairs to significantly reduce problem size
-        close_recipient_pairs = []
-        for r1 in range(self.num_recipients):
-            for r2 in range(r1 + 1, self.num_recipients):
-                # Calculate distance between recipients
-                r1_lat, r1_lon = self.recipients[r1].latitude, self.recipients[r1].longitude
-                r2_lat, r2_lon = self.recipients[r2].latitude, self.recipients[r2].longitude
-                recip_distance = self._haversine_distance(r1_lat, r1_lon, r2_lat, r2_lon)
-                
-                # Only consider very close recipients
-                if recip_distance <= 5.0:  # Reduce threshold to 5 km
-                    close_recipient_pairs.append((r1, r2, recip_distance))
-        
-        # Limit the number of pairs to consider (take the closest N pairs)
-        max_pairs = min(500, len(close_recipient_pairs))  # Cap at 500 pairs
-        close_recipient_pairs.sort(key=lambda x: x[2])  # Sort by distance
-        close_recipient_pairs = close_recipient_pairs[:max_pairs]  # Take only the closest pairs
-        
-        # Only create variables for the filtered pairs
-        for v in range(min(10, self.num_volunteers)):  # Limit to top 10 volunteers
-            for r1, r2, recip_distance in close_recipient_pairs:
-                # Create auxiliary variable for when both recipients are assigned to same volunteer
-                z = solver.BoolVar(f'z_compact_{v}_{r1}_{r2}')
-                solver.Add(z <= x[v, r1])
-                solver.Add(z <= x[v, r2])
-                solver.Add(z >= x[v, r1] + x[v, r2] - 1)
-                
-                # Use negative coefficient to give preference to assigning close recipients together
-                # Scale inversely with distance so closer recipients get higher preference
-                objective.SetCoefficient(z, -recipient_distance_weight / (1.0 + recip_distance))
+        if weights['compact_routes']:
+            # Pre-compute distances and filter only close pairs to significantly reduce problem size
+            close_recipient_pairs = []
+            for r1 in range(self.num_recipients):
+                for r2 in range(r1 + 1, self.num_recipients):
+                    # Calculate distance between recipients
+                    r1_lat, r1_lon = self.recipients[r1].latitude, self.recipients[r1].longitude
+                    r2_lat, r2_lon = self.recipients[r2].latitude, self.recipients[r2].longitude
+                    recip_distance = self._haversine_distance(r1_lat, r1_lon, r2_lat, r2_lon)
+                    
+                    # Only consider very close recipients
+                    if recip_distance <= recipient_distance_norm:
+                        close_recipient_pairs.append((r1, r2, recip_distance))
+            
+            # Limit the number of pairs to consider (take the closest N pairs)
+            max_pairs = min(500, len(close_recipient_pairs))  # Cap at 500 pairs
+            close_recipient_pairs.sort(key=lambda x: x[2])  # Sort by distance
+            close_recipient_pairs = close_recipient_pairs[:max_pairs]  # Take only the closest pairs
+            
+            print(f"Using {len(close_recipient_pairs)} close recipient pairs for compact routes")
+            
+            # Only create variables for the filtered pairs (limit to top volunteers for performance)
+            for v in range(min(10, self.num_volunteers)):
+                for r1, r2, recip_distance in close_recipient_pairs:
+                    # Create auxiliary variable for when both recipients are assigned to same volunteer
+                    z = solver.BoolVar(f'z_compact_{v}_{r1}_{r2}')
+                    solver.Add(z <= x[v, r1])
+                    solver.Add(z <= x[v, r2])
+                    solver.Add(z >= x[v, r1] + x[v, r2] - 1)
+                    
+                    # Normalize the distance score (1 when very close, 0 when far)
+                    normalized_closeness = 1.0 - (recip_distance / recipient_distance_norm)
+                    
+                    # Use negative coefficient to give preference to assigning close recipients together
+                    objective.SetCoefficient(z, -weights['compact_routes'] * normalized_closeness)
         
         # Cluster bonuses
-        if self.use_clustering:
-            cluster_weight = -10.0
+        if self.use_clustering and weights['clusters']:
             for cluster_id, recipient_indices in self.clusters.items():
                 if cluster_id != -1 and len(recipient_indices) > 1:
+                    # Count the actual pairs within the distance threshold
+                    valid_cluster_pairs = 0
+                    
                     for v in range(self.num_volunteers):
                         for i in range(len(recipient_indices)):
                             for j in range(i + 1, len(recipient_indices)):
                                 r1, r2 = recipient_indices[i], recipient_indices[j]
                                 if r1 < 0 or r2 < 0 or r1 >= self.num_recipients or r2 >= self.num_recipients:
                                     continue
+                                    
+                                valid_cluster_pairs += 1
                                 z = solver.BoolVar(f'z_{v}_{r1}_{r2}')
                                 solver.Add(z <= x[v, r1])
                                 solver.Add(z <= x[v, r2])
                                 solver.Add(z >= x[v, r1] + x[v, r2] - 1)
-                                objective.SetCoefficient(z, cluster_weight)
+                                objective.SetCoefficient(z, -weights['clusters'])
+            
+            print(f"Created {valid_cluster_pairs} cluster pair variables")
         
         objective.SetMinimization()
         
@@ -823,4 +868,3 @@ class VolunteerAssignerOpt:
         
         print("Assignment pipeline completed successfully!")
         return True
-
