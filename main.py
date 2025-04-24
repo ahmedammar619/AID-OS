@@ -500,11 +500,11 @@ def compare_approaches(args):
     report += f"![Comparison Plot]({plot_path})\n\n"
     
     # Save report
-    report_path = os.path.join(output_dir, f"comparison_report_{timestamp}.md")
-    with open(report_path, 'w') as f:
-        f.write(report)
+    # report_path = os.path.join(output_dir, f"comparison_report_{timestamp}.md")
+    # with open(report_path, 'w') as f:
+    #     f.write(report)
     
-    print(f"\nComparison completed! Report saved to {report_path}")
+    # print(f"\nComparison completed! Report saved to {report_path}")
     print(f"Comparison plot saved to {plot_path}")
 
 def main():

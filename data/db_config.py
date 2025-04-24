@@ -151,7 +151,7 @@ class DatabaseHandler:
             self.engine = self._create_engine_from_config()
         else:
             # Default to local MySQL instance if no config is provided
-            self.engine = create_engine('mysql+pymysql://root:@localhost/AID_RL')
+            self.engine = create_engine('mysql+pymysql://root:@localhost/AID_OS')
         
         # Create a session factory
         self.Session = sessionmaker(bind=self.engine)
@@ -264,7 +264,7 @@ class DatabaseHandler:
         session.close()
 
 
-        return test_volunteers
+        return volunteers
     
     def get_all_recipients(self):
         """Retrieve all recipients from the database."""
@@ -274,7 +274,7 @@ class DatabaseHandler:
             # Recipient.distributor_id == None
         ).all()
         session.close()
-        return test_recipients
+        return recipients
     
     def get_all_pickups(self):
         """Retrieve all pickup locations from the database."""
@@ -352,6 +352,47 @@ class DatabaseHandler:
         if count > 3:
             return 3.0  # Maximum score
         return count * 1.0  # 1 point per previous match
+        
+    def execute_raw_query(self, query, params=None):
+        """
+        Execute a raw SQL query and return results.
+        
+        Args:
+            query (str): The SQL query to execute
+            params (tuple, optional): Parameters for the query
+        
+        Returns:
+            list: List of dictionaries representing the query results
+        """
+        try:
+            from sqlalchemy import text
+            connection = self.engine.connect()
+            
+            # Create a text object with parameters
+            if params:
+                if isinstance(params, tuple) and len(params) == 1:
+                    # Convert single-value tuple to dict with positional placeholders
+                    sql = text(query.replace("%s", ":param0"))
+                    result = connection.execute(sql, {"param0": params[0]})
+                else:
+                    # For multiple parameters or non-tuple params
+                    sql = text(query)
+                    result = connection.execute(sql, params)
+            else:
+                sql = text(query)
+                result = connection.execute(sql)
+                
+            # Convert to list of dictionaries
+            columns = result.keys()
+            data = []
+            for row in result:
+                data.append(dict(zip(columns, row)))
+                
+            connection.close()
+            return data
+        except Exception as e:
+            print(f"Error executing query: {e}")
+            return []
 
 #method to be added to a method to count the number of rows in an array
 def count(array):
