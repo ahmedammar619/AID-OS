@@ -782,29 +782,91 @@ class VolunteerAssignerOpt:
                     tooltip=f"Recipient {recipient.recipient_id}"
                 ).add_to(group)
                 
-                # Draw route: Pickup -> Recipient (green line)
-                folium.PolyLine(
+                # We'll draw the VRP routes at the end after processing all recipients
+            
+            # Now draw the optimized VRP-style route
+            # First: Volunteer -> Pickup
+            folium.PolyLine(
+                locations=[
+                    [volunteer.latitude, volunteer.longitude],
+                    [pickup.latitude, pickup.longitude]
+                ],
+                color='blue',
+                weight=3,
+                opacity=0.8,
+                tooltip=f"To Pickup: {self._haversine_distance(volunteer.latitude, volunteer.longitude, pickup.latitude, pickup.longitude):.1f} km"
+            ).add_to(group)
+            
+            # Get the optimized route coordinates
+            _, _, route_coords = self._calculate_route_travel_time(
+                volunteer_idx, recipient_indices, 
+                pickup_idx=next(i for i, p in enumerate(self.pickups) if p.location_id == pickup_id)
+            )
+            
+            # Extract just the recipient coordinates (skip volunteer->pickup->first_recipient)
+            # The route is: volunteer -> pickup -> recipients -> volunteer
+            recipient_route = route_coords[1:-1]  # Skip first (volunteer) and last (return to volunteer)
+            
+            # Draw route segments with arrows for direction
+            for i in range(len(recipient_route) - 1):
+                start_lat, start_lon = recipient_route[i]
+                end_lat, end_lon = recipient_route[i+1]
+                
+                # Calculate the distance for this segment
+                segment_distance = self._haversine_distance(start_lat, start_lon, end_lat, end_lon)
+                
+                # Determine color based on segment type
+                color = 'green'
+                segment_type = "Pickup to Recipient" if i == 0 else "Recipient to Recipient"
+                
+                # Create the line
+                line = folium.PolyLine(
                     locations=[
-                        [pickup.latitude, pickup.longitude],
-                        [recipient.latitude, recipient.longitude]
+                        [start_lat, start_lon],
+                        [end_lat, end_lon]
                     ],
-                    color='green',
+                    color=color,
                     weight=3,
                     opacity=0.8,
-                    tooltip=f"Pickup to Recipient: {self._haversine_distance(pickup.latitude, pickup.longitude, recipient.latitude, recipient.longitude):.1f} km"
+                    tooltip=f"{segment_type}: {segment_distance:.1f} km"
                 ).add_to(group)
                 
-                # Draw route: Recipient -> Volunteer (purple line, for return trip)
-                folium.PolyLine(
-                    locations=[
-                        [recipient.latitude, recipient.longitude],
-                        [volunteer.latitude, volunteer.longitude]
-                    ],
-                    color='purple',
-                    weight=2,
-                    opacity=0.6,
-                    tooltip=f"Return Trip: {self._haversine_distance(recipient.latitude, recipient.longitude, volunteer.latitude, volunteer.longitude):.1f} km"
+                # Add arrow marker at midpoint
+                midpoint_lat = (start_lat + end_lat) / 2
+                midpoint_lon = (start_lon + end_lon) / 2
+                
+                # Calculate bearing for arrow direction
+                y = math.sin(end_lon - start_lon) * math.cos(end_lat)
+                x = math.cos(start_lat) * math.sin(end_lat) - math.sin(start_lat) * math.cos(end_lat) * math.cos(end_lon - start_lon)
+                bearing = math.atan2(y, x)
+                bearing = math.degrees(bearing)
+                bearing = (bearing + 360) % 360
+                
+                # Add arrow icon
+                arrow_icon = folium.features.DivIcon(
+                    icon_size=(20, 20),
+                    icon_anchor=(10, 10),
+                    html=f'<div style="font-size: 12pt; color: {color}; transform: rotate({bearing}deg);">➤</div>'
+                )
+                
+                folium.Marker(
+                    [midpoint_lat, midpoint_lon],
+                    icon=arrow_icon
                 ).add_to(group)
+            
+            # Draw the final return route: Last recipient -> Volunteer
+            last_recipient_lat, last_recipient_lon = recipient_route[-1]
+            
+            folium.PolyLine(
+                locations=[
+                    [last_recipient_lat, last_recipient_lon],
+                    [volunteer.latitude, volunteer.longitude]
+                ],
+                color='purple',
+                weight=2,
+                opacity=0.6,
+                tooltip=f"Return Trip: {self._haversine_distance(last_recipient_lat, last_recipient_lon, volunteer.latitude, volunteer.longitude):.1f} km"
+            ).add_to(group)
             
             group.add_to(m)
         
@@ -813,7 +875,7 @@ class VolunteerAssignerOpt:
         <div style="position: fixed; bottom: 50px; left: 50px; z-index: 1000; background-color: white; padding: 10px; border: 2px solid grey; border-radius: 5px;">
             <h4>Route Legend</h4>
             <div><i style="background: blue; width: 15px; height: 3px; display: inline-block;"></i> Volunteer to Pickup</div>
-            <div><i style="background: green; width: 15px; height: 3px; display: inline-block;"></i> Pickup to Recipient</div>
+            <div><i style="background: green; width: 15px; height: 3px; display: inline-block;"></i> Optimized Delivery Route ➤</div>
             <div><i style="background: purple; width: 15px; height: 3px; display: inline-block;"></i> Return Trip</div>
             <div style="margin-top: 5px;">
                 <i style="background: blue; width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></i> Volunteer
