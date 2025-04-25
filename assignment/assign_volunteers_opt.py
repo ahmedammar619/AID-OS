@@ -207,11 +207,130 @@ class VolunteerAssignerOpt:
         recipient_id = self.recipients[recipient_idx].recipient_id
         return self.db_handler.get_volunteer_historical_score(volunteer_id, recipient_id)
     
+    def _solve_tsp(self, points, start_idx=None, end_idx=None):
+        """
+        Solve the Traveling Salesman Problem using a simpler algorithm to avoid infinite loops.
+        This uses a greedy nearest neighbor approach with a small improvement phase.
+        
+        Args:
+            points (list): List of (lat, lon) coordinates.
+            start_idx (int, optional): Index of the starting point (fixed).
+            end_idx (int, optional): Index of the ending point (fixed).
+            
+        Returns:
+            list: Optimized route indices.
+            float: Total route distance.
+        """
+        n = len(points)
+        if n <= 2:
+            return list(range(n)), 0.0
+        
+        # Create distance matrix
+        dist_matrix = np.zeros((n, n))
+        for i in range(n):
+            for j in range(i+1, n):
+                dist = self._haversine_distance(
+                    points[i][0], points[i][1],
+                    points[j][0], points[j][1]
+                )
+                dist_matrix[i, j] = dist
+                dist_matrix[j, i] = dist
+        
+        # Initialize route with starting point
+        if start_idx is not None:
+            route = [start_idx]
+            current = start_idx
+        else:
+            route = [0]
+            current = 0
+        
+        # Collect unvisited points
+        unvisited = set(range(n))
+        unvisited.remove(current)
+        
+        # If end point is specified, remove it from unvisited as we'll add it last
+        if end_idx is not None and end_idx != start_idx:
+            if end_idx in unvisited:
+                unvisited.remove(end_idx)
+        
+        # Simple nearest neighbor algorithm
+        while unvisited:
+            # Find closest unvisited point
+            next_point = min(unvisited, key=lambda x: dist_matrix[current, x])
+            route.append(next_point)
+            current = next_point
+            unvisited.remove(next_point)
+        
+        # Add end point if specified
+        if end_idx is not None and end_idx != start_idx and end_idx not in route:
+            route.append(end_idx)
+        
+        # Simple improvement: check if any single swap improves the route
+        # Limit to max 10 iterations to prevent infinite loops
+        max_iterations = 10
+        for _ in range(max_iterations):
+            improved = False
+            best_improvement = 0
+            best_swap = None
+            
+            # Check all possible swaps of non-fixed points
+            for i in range(1, len(route) - 1):
+                if start_idx is not None and i == 0:
+                    continue  # Skip start point
+                    
+                for j in range(i + 1, len(route)):
+                    if end_idx is not None and j == len(route) - 1:
+                        continue  # Skip end point
+                    
+                    # Calculate current segment distances
+                    if i == 0:
+                        d1 = 0  # No previous segment for first point
+                    else:
+                        d1 = dist_matrix[route[i-1], route[i]]
+                        
+                    if j == len(route) - 1:
+                        d2 = 0  # No next segment for last point
+                    else:
+                        d2 = dist_matrix[route[j], route[j+1]]
+                    
+                    # Calculate new segment distances if we swap
+                    if i == 0:
+                        d3 = 0
+                    else:
+                        d3 = dist_matrix[route[i-1], route[j]]
+                        
+                    if j == len(route) - 1:
+                        d4 = 0
+                    else:
+                        d4 = dist_matrix[route[i], route[j+1]]
+                    
+                    # Calculate improvement
+                    improvement = (d1 + d2) - (d3 + d4)
+                    if improvement > best_improvement:
+                        best_improvement = improvement
+                        best_swap = (i, j)
+            
+            # Apply the best swap if it improves the route
+            if best_swap and best_improvement > 0:
+                i, j = best_swap
+                route[i], route[j] = route[j], route[i]
+                improved = True
+            
+            if not improved:
+                break
+        
+        # Calculate total distance
+        total_dist = 0.0
+        for i in range(len(route) - 1):
+            total_dist += dist_matrix[route[i], route[i+1]]
+        
+        return route, total_dist
+    
     def _calculate_route_travel_time(self, volunteer_idx, recipient_indices, pickup_idx=None):
         """
         Calculate estimated travel time and distance for a volunteer's route.
         Route: volunteer home -> pickup location -> recipients -> volunteer home
-        Uses greedy nearest-neighbor algorithm, assumes 30 km/h speed and 5 min/stop.
+        Uses an optimized TSP solution for routing, assumes 30 km/h speed and 5 min/stop.
         
         Args:
             volunteer_idx (int): Index of the volunteer.
@@ -243,28 +362,34 @@ class VolunteerAssignerOpt:
         recipient_coords = [(self.recipients[r_idx].latitude, self.recipients[r_idx].longitude)
                            for r_idx in recipient_indices]
         
-        # Calculate route: volunteer -> pickup
-        total_distance = self._haversine_distance(v_lat, v_lon, p_lat, p_lon)
+        # Calculate direct distance: volunteer -> pickup
+        vol_to_pickup_dist = self._haversine_distance(v_lat, v_lon, p_lat, p_lon)
         
-        # Start from pickup location
-        current_lat, current_lon = p_lat, p_lon
-        unvisited = recipient_coords.copy()
-        route_coords = [(v_lat, v_lon), (p_lat, p_lon)]  # Start with volunteer -> pickup
+        # If there are no recipients, just return the round trip to pickup
+        if not recipient_coords:
+            return (vol_to_pickup_dist * 2 / 30.0) * 60.0 + 10.0, vol_to_pickup_dist * 2, [(v_lat, v_lon), (p_lat, p_lon), (v_lat, v_lon)]
         
-        # Calculate route: pickup -> recipients (using nearest neighbor)
-        while unvisited:
-            distances = [self._haversine_distance(current_lat, current_lon, r_lat, r_lon)
-                        for r_lat, r_lon in unvisited]
-            nearest_idx = distances.index(min(distances))
-            next_lat, next_lon = unvisited[nearest_idx]
-            total_distance += distances[nearest_idx]
-            current_lat, current_lon = next_lat, next_lon
-            route_coords.append((current_lat, current_lon))
-            unvisited.pop(nearest_idx)
+        # Create points list for TSP: [pickup, recipient1, recipient2, ..., recipientN]
+        # Note: We'll handle volunteer->pickup and last_recipient->volunteer separately
+        tsp_points = [(p_lat, p_lon)] + recipient_coords
         
-        # Calculate route: last recipient -> volunteer home
-        total_distance += self._haversine_distance(current_lat, current_lon, v_lat, v_lon)
-        route_coords.append((v_lat, v_lon))  # Return to volunteer's home
+        # Solve TSP with pickup as the fixed starting point (index 0)
+        route_indices, route_distance = self._solve_tsp(tsp_points, start_idx=0)
+        
+        # Create the full route coordinates
+        route_coords = [(v_lat, v_lon)]  # Start at volunteer's home
+        
+        # Add the TSP route points in the optimized order
+        for idx in route_indices:
+            route_coords.append(tsp_points[idx])
+        
+        # Add the return to volunteer's home
+        route_coords.append((v_lat, v_lon))
+        
+        # Calculate total distance including return to volunteer
+        last_point = tsp_points[route_indices[-1]]
+        last_to_vol_dist = self._haversine_distance(last_point[0], last_point[1], v_lat, v_lon)
+        total_distance = vol_to_pickup_dist + route_distance + last_to_vol_dist
         
         # Calculate travel time (30 km/h driving + 5 min per stop + 10 min at pickup)
         travel_time = (total_distance / 30.0) * 60.0 + len(recipient_indices) * 5.0 + 10.0
