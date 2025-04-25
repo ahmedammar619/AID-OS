@@ -228,33 +228,18 @@ def run_pipeline_rl(args):
 
 def run_pipeline_opt(args):
     """Run the complete optimization assignment pipeline."""
-    print("Running complete optimization assignment pipeline...")
-    import webbrowser
-    import glob
-    
-    # Create assigner
+    import webbrowser, os
+    from datetime import datetime
+    print("Displaying assignment map...")
+    # Generate assignments only
     assigner = VolunteerAssignerOpt(output_dir=args.output_dir)
-    
-    # Run pipeline
-    success = assigner.run_complete_pipeline(
-        export_csv=True,
-        save_visualizations=True,
-        save_report=True
-    )
-    
+    success = assigner.generate_assignments()
     if success:
-        print("Optimization pipeline completed successfully!")
-        # Try to open the most recent assignment map or cluster map
-        output_dir = args.output_dir if hasattr(args, 'output_dir') else './hist/output'
-        # Try assignment_map first, then cluster_map
-        html_files = sorted(glob.glob(os.path.join(output_dir, 'assignment_map_*.html')), reverse=True)
-        if not html_files:
-            html_files = sorted(glob.glob(os.path.join(output_dir, 'cluster_map.html')), reverse=True)
-        if html_files:
-            print(f"Opening map: {html_files[0]}")
-            webbrowser.open(f'file://{os.path.abspath(html_files[0])}')
-        else:
-            print("No map HTML file found to open.")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        map_path = os.path.join(args.output_dir, f"assignment_map_{timestamp}.html")
+        assigner.visualize_assignments(save_path=map_path, show=False)
+        print(f"Opening map: {map_path}")
+        webbrowser.open(f'file://{os.path.abspath(map_path)}')
     else:
         print("Optimization pipeline failed!")
 
@@ -395,6 +380,9 @@ def compare_approaches(args):
     
     # Export RL assignments
     rl_csv_path = rl_assigner.export_assignments_to_csv(f"assignments_rl_{timestamp}.csv")
+    # Load and then remove RL CSV (no persistence)
+    rl_df = pd.read_csv(rl_csv_path)
+    os.remove(rl_csv_path)
     
     # Run optimization pipeline
     print("\n2. Running optimization pipeline...")
@@ -407,10 +395,10 @@ def compare_approaches(args):
     
     # Export optimization assignments
     opt_csv_path = opt_assigner.export_assignments_to_csv(f"assignments_opt_{timestamp}.csv")
-    
-    # Load assignment data
-    rl_df = pd.read_csv(rl_csv_path)
+    # Load and then remove Optimization CSV (no persistence)
     opt_df = pd.read_csv(opt_csv_path)
+    os.remove(opt_csv_path)
+    # DataFrames now ready for plotting/comparison
     
     # Calculate metrics for comparison
     rl_total_volunteers = len(rl_df['volunteer_id'].unique())
@@ -418,7 +406,11 @@ def compare_approaches(args):
     
     # Handle different column names in RL and optimization CSVs
     rl_distance_col = 'distance' if 'distance' in rl_df.columns else 'distance_km'
-    opt_distance_col = 'distance_km' if 'distance_km' in opt_df.columns else 'distance'
+    # Choose distance column for optimization (prefer total_route_km)
+    if 'total_route_km' in opt_df.columns:
+        opt_distance_col = 'total_route_km'
+    else:
+        opt_distance_col = 'distance_km' if 'distance_km' in opt_df.columns else 'distance'
     
     rl_total_distance = rl_df[rl_distance_col].sum()
     opt_total_distance = opt_df[opt_distance_col].sum()
