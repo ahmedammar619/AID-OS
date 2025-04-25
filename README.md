@@ -2,12 +2,12 @@
 
 ## Project Overview
 
-This project provides an end-to-end solution for automating and optimizing the monthly assignment of volunteers to recipients for box deliveries. The system has evolved from an initial Reinforcement Learning (RL) approach to a robust, scalable optimization-based method using Google OR-Tools. Both approaches are included for benchmarking, educational value, and transparency.
+This project provides an end-to-end solution for automating and optimizing the monthly assignment of volunteers to recipients for box deliveries, with integrated pickup locations. The system has evolved from an initial Reinforcement Learning (RL) approach to a robust, scalable optimization-based method using Google OR-Tools. Both approaches are included for benchmarking, educational value, and transparency.
 
 ### Why Two Approaches?
 - **Optimization Approach (Current, Preferred):**
   - Uses Mixed-Integer Programming (MIP) via Google OR-Tools for globally optimal, deterministic assignments.
-  - Handles complex constraints (vehicle capacity, proximity, clustering, historical preferences) efficiently and transparently.
+  - Handles complex constraints (vehicle capacity, proximity, clustering, historical preferences, pickup locations) efficiently and transparently.
   - Significantly outperforms RL in solution quality, speed, and maintainability for this use case.
 - **Reinforcement Learning (Legacy, Benchmark):**
   - Actor-Critic RL agent learns assignment policies over time.
@@ -84,8 +84,8 @@ Assign volunteers (with vehicle capacity limits and home locations) to recipient
    python main.py compare
    ```
 6. **View outputs:**
-   - Assignments CSVs in `output/`
-   - Interactive maps and reports in `output/`
+   - Interactive maps and comparison graphs in `output/`
+   - (Optional) Assignments CSVs and reports can be exported, but are not required for testing. Temporary CSVs used for comparison are deleted after use.
 
 ---
 
@@ -277,9 +277,12 @@ Data is extracted via SQL queries using a suitable Python connector, SQLAlchemy.
 
 ### 5. Visualization and Reporting
 - Interactive map visualization with Folium
+  - Pickup locations are shown with a marker displaying both available items and the total number of boxes needed (demand) at each site.
+  - Volunteer, pickup, and recipient routes are visualized, showing the full delivery path.
 - Detailed popup information including:
   - Volunteer capacity and utilization
   - Assigned recipients and box counts
+  - Pickup location demand (boxes needed at each pickup)
   - Estimated travel time and distance
 - Load distribution charts
 - Comprehensive assignment reports
@@ -346,7 +349,6 @@ AID-RL/
 
 ## ✨ Future Features
 
-- **Pickup Location Integration:** Include food pickup locations in route planning
 - **Advanced Route Optimization:** Implement full Traveling Salesman Problem (TSP) solution
 - **Recipient Time Windows:** Support for preferred delivery time slots
 - **Fairness Metrics:** Balance volunteer usage over time
