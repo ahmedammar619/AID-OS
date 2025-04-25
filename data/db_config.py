@@ -12,6 +12,7 @@ import random
 # Define your data structures
 Volunteer = namedtuple('Volunteer', ['volunteer_id', 'latitude', 'longitude', 'car_size'])
 Recipient = namedtuple('Recipient', ['recipient_id', 'latitude', 'longitude', 'num_items'])
+Pickup = namedtuple('Pickup', ['location_id', 'latitude', 'longitude', 'num_items', 'active'])
 
 # 20 volunteers spread over a city grid
 random.seed(42)
@@ -36,6 +37,14 @@ for i in range(1,51):
     else:
         boxes = 1                           # typical case
     test_recipients.append(Recipient(i, lat, lon, boxes))
+    
+# 2 pickup locations (centrally located distribution centers)
+test_pickups = [
+    # Downtown distribution center
+    Pickup(1, 34.05, -118.25, 500, 1),  # Central Los Angeles location with high capacity
+    # West side distribution center
+    Pickup(2, 34.02, -118.40, 300, 1)   # West LA location (closer to Santa Monica)
+]
 
 # Quick sanity prints
 # print("Volunteers:", len(test_volunteers))
@@ -283,7 +292,7 @@ class DatabaseHandler:
             Pickup.active == 1  # Using 1 instead of True for MySQL
         ).all()
         session.close()
-        return pickups
+        return test_pickups
 
 
     def get_historical_deliveries(self):

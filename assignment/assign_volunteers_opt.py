@@ -141,18 +141,56 @@ class VolunteerAssignerOpt:
     
     def _create_distance_matrix(self):
         """
-        Create a distance matrix between volunteers and recipients.
+        Create comprehensive distance matrices between volunteers, pickups, and recipients.
         
         Returns:
-            numpy.ndarray: Matrix of distances [volunteer_idx][recipient_idx].
+            dict: Dictionary containing various distance matrices:
+                - vol_to_recip: Direct distances from volunteers to recipients
+                - vol_to_pickup: Distances from volunteers to pickup locations
+                - pickup_to_recip: Distances from pickup locations to recipients
+                - vol_pickup_recip: Combined distances for the route: volunteer -> pickup -> recipient
         """
-        distance_matrix = np.zeros((self.num_volunteers, self.num_recipients))
+        # Initialize distance matrices
+        vol_to_recip = np.zeros((self.num_volunteers, self.num_recipients))
+        vol_to_pickup = np.zeros((self.num_volunteers, len(self.pickups)))
+        pickup_to_recip = np.zeros((len(self.pickups), self.num_recipients))
+        
+        # Calculate volunteer to recipient distances (direct)
         for v_idx in range(self.num_volunteers):
             v_lat, v_lon = self.volunteers[v_idx].latitude, self.volunteers[v_idx].longitude
             for r_idx in range(self.num_recipients):
                 r_lat, r_lon = self.recipients[r_idx].latitude, self.recipients[r_idx].longitude
-                distance_matrix[v_idx, r_idx] = self._haversine_distance(v_lat, v_lon, r_lat, r_lon)
-        return distance_matrix
+                vol_to_recip[v_idx, r_idx] = self._haversine_distance(v_lat, v_lon, r_lat, r_lon)
+        
+        # Calculate volunteer to pickup distances
+        for v_idx in range(self.num_volunteers):
+            v_lat, v_lon = self.volunteers[v_idx].latitude, self.volunteers[v_idx].longitude
+            for p_idx, pickup in enumerate(self.pickups):
+                p_lat, p_lon = pickup.latitude, pickup.longitude
+                vol_to_pickup[v_idx, p_idx] = self._haversine_distance(v_lat, v_lon, p_lat, p_lon)
+        
+        # Calculate pickup to recipient distances
+        for p_idx, pickup in enumerate(self.pickups):
+            p_lat, p_lon = pickup.latitude, pickup.longitude
+            for r_idx in range(self.num_recipients):
+                r_lat, r_lon = self.recipients[r_idx].latitude, self.recipients[r_idx].longitude
+                pickup_to_recip[p_idx, r_idx] = self._haversine_distance(p_lat, p_lon, r_lat, r_lon)
+        
+        # Create a 3D matrix for the combined route: volunteer -> pickup -> recipient
+        # This represents the total distance for each volunteer-pickup-recipient combination
+        vol_pickup_recip = np.zeros((self.num_volunteers, len(self.pickups), self.num_recipients))
+        for v_idx in range(self.num_volunteers):
+            for p_idx in range(len(self.pickups)):
+                for r_idx in range(self.num_recipients):
+                    # Total distance: volunteer -> pickup -> recipient
+                    vol_pickup_recip[v_idx, p_idx, r_idx] = vol_to_pickup[v_idx, p_idx] + pickup_to_recip[p_idx, r_idx]
+        
+        return {
+            'vol_to_recip': vol_to_recip,  # Direct distances (for comparison)
+            'vol_to_pickup': vol_to_pickup,
+            'pickup_to_recip': pickup_to_recip,
+            'vol_pickup_recip': vol_pickup_recip  # Combined route distances
+        }
     
     def _get_historical_match_score(self, volunteer_idx, recipient_idx):
         """
@@ -169,30 +207,51 @@ class VolunteerAssignerOpt:
         recipient_id = self.recipients[recipient_idx].recipient_id
         return self.db_handler.get_volunteer_historical_score(volunteer_id, recipient_id)
     
-    def _calculate_route_travel_time(self, volunteer_idx, recipient_indices):
+    def _calculate_route_travel_time(self, volunteer_idx, recipient_indices, pickup_idx=None):
         """
         Calculate estimated travel time and distance for a volunteer's route.
+        Route: volunteer home -> pickup location -> recipients -> volunteer home
         Uses greedy nearest-neighbor algorithm, assumes 30 km/h speed and 5 min/stop.
         
         Args:
             volunteer_idx (int): Index of the volunteer.
             recipient_indices (list): List of recipient indices.
+            pickup_idx (int, optional): Index of the pickup location. If None, uses the closest pickup.
             
         Returns:
             float: Travel time in minutes.
             float: Total distance in kilometers.
+            list: Ordered list of coordinates for the route [volunteer, pickup, recipients..., volunteer]
         """
         if not recipient_indices:
-            return 0.0, 0.0
+            return 0.0, 0.0, []
         
+        # Get volunteer coordinates
         v_lat, v_lon = self.volunteers[volunteer_idx].latitude, self.volunteers[volunteer_idx].longitude
+        
+        # Determine pickup location (use closest if not specified)
+        if pickup_idx is None:
+            # Find closest pickup to volunteer
+            pickup_distances = [self._haversine_distance(v_lat, v_lon, p.latitude, p.longitude) 
+                              for p in self.pickups]
+            pickup_idx = pickup_distances.index(min(pickup_distances))
+        
+        pickup = self.pickups[pickup_idx]
+        p_lat, p_lon = pickup.latitude, pickup.longitude
+        
+        # Get recipient coordinates
         recipient_coords = [(self.recipients[r_idx].latitude, self.recipients[r_idx].longitude)
                            for r_idx in recipient_indices]
         
-        current_lat, current_lon = v_lat, v_lon
-        unvisited = recipient_coords.copy()
-        total_distance = 0.0
+        # Calculate route: volunteer -> pickup
+        total_distance = self._haversine_distance(v_lat, v_lon, p_lat, p_lon)
         
+        # Start from pickup location
+        current_lat, current_lon = p_lat, p_lon
+        unvisited = recipient_coords.copy()
+        route_coords = [(v_lat, v_lon), (p_lat, p_lon)]  # Start with volunteer -> pickup
+        
+        # Calculate route: pickup -> recipients (using nearest neighbor)
         while unvisited:
             distances = [self._haversine_distance(current_lat, current_lon, r_lat, r_lon)
                         for r_lat, r_lon in unvisited]
@@ -200,31 +259,57 @@ class VolunteerAssignerOpt:
             next_lat, next_lon = unvisited[nearest_idx]
             total_distance += distances[nearest_idx]
             current_lat, current_lon = next_lat, next_lon
+            route_coords.append((current_lat, current_lon))
             unvisited.pop(nearest_idx)
         
+        # Calculate route: last recipient -> volunteer home
         total_distance += self._haversine_distance(current_lat, current_lon, v_lat, v_lon)
-        travel_time = (total_distance / 30.0) * 60.0 + len(recipient_indices) * 5.0
-        return travel_time, total_distance
+        route_coords.append((v_lat, v_lon))  # Return to volunteer's home
+        
+        # Calculate travel time (30 km/h driving + 5 min per stop + 10 min at pickup)
+        travel_time = (total_distance / 30.0) * 60.0 + len(recipient_indices) * 5.0 + 10.0
+        
+        return travel_time, total_distance, route_coords
     
     def generate_assignments(self):
         """
         Solve the volunteer-recipient assignment problem using OR-Tools MILP.
+        The model now includes pickup locations in the routing, but with a simplified approach.
+        We pre-assign each volunteer to their closest pickup location to reduce complexity.
         
         Returns:
             bool: Whether the solution was successful.
         """
-        print("Solving assignment problem using optimization...")
+        print("Solving assignment problem using optimization with pickup locations...")
         start_time = time.time()
         
+        # Step 1: Pre-assign each volunteer to their closest pickup location
+        self.volunteer_pickup_assignments = {}
+        for v_idx in range(self.num_volunteers):
+            v_lat, v_lon = self.volunteers[v_idx].latitude, self.volunteers[v_idx].longitude
+            
+            # Find closest pickup location
+            pickup_distances = [self._haversine_distance(v_lat, v_lon, p.latitude, p.longitude) 
+                              for p in self.pickups]
+            closest_pickup_idx = pickup_distances.index(min(pickup_distances))
+            self.volunteer_pickup_assignments[v_idx] = closest_pickup_idx
+            
+        print(f"Pre-assigned {len(self.volunteer_pickup_assignments)} volunteers to their closest pickup locations")
+        
+        # Step 2: Create solver and decision variables
         solver = pywraplp.Solver.CreateSolver('SCIP')
         if not solver:
             print("Could not create solver!")
             return False
         
         # Decision variables
+        # x[v,r] = 1 if volunteer v is assigned to recipient r
         x = {(v, r): solver.BoolVar(f'x_{v}_{r}')
              for v in range(self.num_volunteers) for r in range(self.num_recipients)}
+        
+        # y[v] = 1 if volunteer v is used
         y = {v: solver.BoolVar(f'y_{v}') for v in range(self.num_volunteers)}
+
         
         # Constraints
         # 1. Each recipient assigned to exactly one volunteer
@@ -252,8 +337,19 @@ class VolunteerAssignerOpt:
         # Calculate normalization factors
         print("Calculating normalization factors for objective terms...")
         
-        # For distance normalization
-        max_distance = max(max(row) for row in self.distance_matrix) if self.distance_matrix.size > 0 else 1.0
+        # For distance normalization - use the maximum distance from any matrix in our dictionary
+        # First check the direct volunteer to recipient distances
+        max_vol_recip_dist = max(max(row) for row in self.distance_matrix['vol_to_recip']) 
+        # Then check the combined route distances (vol -> pickup -> recip)
+        max_route_dist = max(
+            max(
+                max(self.distance_matrix['vol_pickup_recip'][v, k, r] 
+                    for r in range(self.num_recipients))
+                for k in range(len(self.pickups))
+            ) 
+            for v in range(self.num_volunteers)
+        )
+        max_distance = max(max_vol_recip_dist, max_route_dist)
         distance_norm = max_distance if max_distance > 0 else 1.0
         print(f"Max distance: {max_distance:.2f} km (normalization factor)")
         
@@ -287,23 +383,31 @@ class VolunteerAssignerOpt:
         # These constraints ensure that the total normalized distance and average capacity utilization
         # remain within specified bounds, regardless of the objective weights.
         # Adjust these thresholds as needed:
-        DISTANCE_UPPER_BOUND_FACTOR = 1.1  # Allow up to 108% of minimum possible total distance
-        MIN_AVG_CAPACITY_UTIL = 0.5        # Require at least 50% average capacity utilization
+        DISTANCE_UPPER_BOUND_FACTOR = 2.0  # Allow up to 200% of minimum possible total distance
+        MIN_AVG_CAPACITY_UTIL = 0.4        # Require at least 40% average capacity utilization
         use_constraint = True
         if DISTANCE_UPPER_BOUND_FACTOR and MIN_AVG_CAPACITY_UTIL and use_constraint:
-            # 1. Compute minimum possible total normalized distance (assign each recipient to closest volunteer)
+            # 1. Compute minimum possible total normalized distance with pickups
+            # For each recipient, find the minimum distance through any volunteer's assigned pickup
             min_total_distance = 0.0
             for r in range(self.num_recipients):
-                min_dist = min(self.distance_matrix[v, r] for v in range(self.num_volunteers))
-                min_total_distance += min_dist
+                min_route_dist = float('inf')
+                for v in range(self.num_volunteers):
+                    pickup_idx = self.volunteer_pickup_assignments[v]
+                    route_dist = self.distance_matrix['vol_pickup_recip'][v, pickup_idx, r]
+                    min_route_dist = min(min_route_dist, route_dist)
+                min_total_distance += min_route_dist
+                
             min_total_normalized_distance = min_total_distance / distance_norm
             distance_upper_bound = DISTANCE_UPPER_BOUND_FACTOR * min_total_normalized_distance
             print(f"[Constraint] Upper bound for total normalized distance: {distance_upper_bound:.2f}")
 
             # Add constraint: total normalized distance assigned <= upper bound
+            # With pre-assigned pickups, we can directly use the x variables
             total_normalized_distance_expr = solver.Sum(
-                x[v, r] * (self.distance_matrix[v, r] / distance_norm)
-                for v in range(self.num_volunteers) for r in range(self.num_recipients)
+                x[v, r] * (self.distance_matrix['vol_pickup_recip'][v, self.volunteer_pickup_assignments[v], r] / distance_norm)
+                for v in range(self.num_volunteers) 
+                for r in range(self.num_recipients)
             )
             solver.Add(total_normalized_distance_expr <= distance_upper_bound)
 
@@ -320,13 +424,17 @@ class VolunteerAssignerOpt:
 
         # --- END HARD CONSTRAINTS ---
         
-        # Minimize total distance (volunteer to recipient)
+        # Minimize total route distance (volunteer -> pickup -> recipient)
         if weights['distance']:
-            
+            # For each volunteer-recipient combination, use the pre-assigned pickup
             for v in range(self.num_volunteers):
+                pickup_idx = self.volunteer_pickup_assignments[v]
                 for r in range(self.num_recipients):
-                    # Normalize distance to 0-1 scale
-                    normalized_distance = self.distance_matrix[v, r] / distance_norm
+                    # Get the combined route distance: volunteer -> pickup -> recipient
+                    route_distance = self.distance_matrix['vol_pickup_recip'][v, pickup_idx, r]
+                    normalized_distance = route_distance / distance_norm
+                    
+                    # Add the route distance to the objective directly
                     objective.SetCoefficient(x[v, r], weights['distance'] * normalized_distance)
         
         # Minimize number of volunteers (negative weight since we want to minimize)
@@ -424,14 +532,28 @@ class VolunteerAssignerOpt:
             
             self.assignments = []
             self.assignment_map = {}
+            self.pickup_assignments = {}  # volunteer_id -> pickup_id
             
+            # Store the pickup assignment for each volunteer (from pre-assignment)
             for v in range(self.num_volunteers):
                 volunteer_id = self.volunteers[v].volunteer_id
                 self.assignment_map[volunteer_id] = []
+                
+                # Get the pre-assigned pickup for this volunteer
+                pickup_idx = self.volunteer_pickup_assignments[v]
+                pickup_id = self.pickups[pickup_idx].location_id
+                self.pickup_assignments[volunteer_id] = pickup_id
+            
+            # Store the volunteer-recipient assignments
+            for v in range(self.num_volunteers):
+                volunteer_id = self.volunteers[v].volunteer_id
                 for r in range(self.num_recipients):
                     if x[v, r].solution_value() > 0.5:
                         recipient_id = self.recipients[r].recipient_id
-                        self.assignments.append((volunteer_id, recipient_id))
+                        pickup_id = self.pickup_assignments.get(volunteer_id)
+                        
+                        # Store as (volunteer_id, recipient_id, pickup_id)
+                        self.assignments.append((volunteer_id, recipient_id, pickup_id))
                         self.assignment_map[volunteer_id].append(recipient_id)
             
             return True
@@ -455,7 +577,7 @@ class VolunteerAssignerOpt:
     
     def export_assignments_to_csv(self, filename=None):
         """
-        Export assignments to a CSV file.
+        Export assignments to a CSV file, including pickup location information.
         
         Args:
             filename (str, optional): Name of the file to save.
@@ -468,18 +590,42 @@ class VolunteerAssignerOpt:
             return None
         
         data = []
-        for volunteer_id, recipient_id in self.assignments:
+        for volunteer_id, recipient_id, pickup_id in self.assignments:
             volunteer = next(v for v in self.volunteers if v.volunteer_id == volunteer_id)
             recipient = next(r for r in self.recipients if r.recipient_id == recipient_id)
+            pickup = next(p for p in self.pickups if p.location_id == pickup_id)
+            
+            # Calculate distances for each leg of the journey
+            vol_to_pickup_dist = self._haversine_distance(
+                volunteer.latitude, volunteer.longitude,
+                pickup.latitude, pickup.longitude
+            )
+            
+            pickup_to_recip_dist = self._haversine_distance(
+                pickup.latitude, pickup.longitude,
+                recipient.latitude, recipient.longitude
+            )
+            
+            recip_to_vol_dist = self._haversine_distance(
+                recipient.latitude, recipient.longitude,
+                volunteer.latitude, volunteer.longitude
+            )
+            
+            # Total route distance
+            total_route_dist = vol_to_pickup_dist + pickup_to_recip_dist + recip_to_vol_dist
+            
             data.append({
                 'volunteer_id': volunteer_id,
                 'volunteer_car_size': volunteer.car_size,
+                'pickup_id': pickup_id,
+                'pickup_lat': pickup.latitude,
+                'pickup_lon': pickup.longitude,
                 'recipient_id': recipient_id,
                 'recipient_num_items': recipient.num_items,
-                'distance_km': self._haversine_distance(
-                    volunteer.latitude, volunteer.longitude,
-                    recipient.latitude, recipient.longitude
-                )
+                'vol_to_pickup_km': vol_to_pickup_dist,
+                'pickup_to_recip_km': pickup_to_recip_dist,
+                'recip_to_vol_km': recip_to_vol_dist,
+                'total_route_km': total_route_dist
             })
         
         df = pd.DataFrame(data)
@@ -494,7 +640,8 @@ class VolunteerAssignerOpt:
     
     def visualize_assignments(self, save_path=None, show=True):
         """
-        Visualize assignments using a Folium map.
+        Visualize assignments using a Folium map, including pickup locations.
+        Shows the complete route: volunteer -> pickup -> recipients -> volunteer.
         
         Args:
             save_path (str, optional): Path to save HTML file.
@@ -507,38 +654,94 @@ class VolunteerAssignerOpt:
             print("No assignments to visualize!")
             return None
         
-        all_lats = [v.latitude for v in self.volunteers] + [r.latitude for r in self.recipients]
-        all_lons = [v.longitude for v in self.volunteers] + [r.longitude for r in self.recipients]
+        # Collect all coordinates for map centering
+        all_lats = [v.latitude for v in self.volunteers] + \
+                  [r.latitude for r in self.recipients] + \
+                  [p.latitude for p in self.pickups]
+        all_lons = [v.longitude for v in self.volunteers] + \
+                  [r.longitude for r in self.recipients] + \
+                  [p.longitude for p in self.pickups]
         center_lat = sum(all_lats) / len(all_lats)
         center_lon = sum(all_lons) / len(all_lons)
         
         m = folium.Map(location=[center_lat, center_lon], zoom_start=12)
+        
+        # Add pickup locations to the map first (they'll be shared by multiple volunteers)
+        pickup_group = folium.FeatureGroup(name="Pickup Locations")
+        for pickup in self.pickups:
+            # Calculate how many boxes are needed from this pickup (sum of all assigned recipients for this pickup)
+            boxes_needed = 0
+            for (volunteer_id, recipient_ids) in self.assignment_map.items():
+                if not recipient_ids:
+                    continue
+                volunteer_idx = next(i for i, v in enumerate(self.volunteers) if v.volunteer_id == volunteer_id)
+                assigned_pickup_idx = self.volunteer_pickup_assignments.get(volunteer_idx)
+                if assigned_pickup_idx is not None and self.pickups[assigned_pickup_idx].location_id == pickup.location_id:
+                    # Sum all boxes for this volunteer's assigned recipients
+                    for rid in recipient_ids:
+                        recipient_idx = next(i for i, r in enumerate(self.recipients) if r.recipient_id == rid)
+                        boxes_needed += self.recipients[recipient_idx].num_items
+            pickup_popup = f"""
+            <b>Pickup Location {pickup.location_id}</b><br>
+            Available Items: {pickup.num_items}<br>
+            <b>Boxes Needed: {boxes_needed}</b><br>
+            Location: ({pickup.latitude:.4f}, {pickup.longitude:.4f})
+            """
+            
+            folium.Marker(
+                location=[pickup.latitude, pickup.longitude],
+                popup=folium.Popup(pickup_popup, max_width=300),
+                icon=folium.Icon(color='green', icon='shopping-cart', prefix='fa'),
+                tooltip=f"Pickup {pickup.location_id}"
+            ).add_to(pickup_group)
+        
+        pickup_group.add_to(m)
+        
+        # Create groups for each volunteer's routes
         volunteer_groups = {}
         
+        # Process each volunteer's assignments
         for volunteer_id, recipient_ids in self.assignment_map.items():
             if not recipient_ids:
                 continue
             
+            # Get volunteer details
             volunteer_idx = next(i for i, v in enumerate(self.volunteers)
                                 if v.volunteer_id == volunteer_id)
             volunteer = self.volunteers[volunteer_idx]
             
+            # Get pickup location for this volunteer
+            pickup_id = self.pickup_assignments.get(volunteer_id)
+            if pickup_id is None:
+                continue  # Skip if no pickup assigned
+                
+            pickup = next(p for p in self.pickups if p.location_id == pickup_id)
+            
+            # Create a feature group for this volunteer
             group = folium.FeatureGroup(name=f"Volunteer {volunteer_id}")
             volunteer_groups[volunteer_id] = group
             
+            # Get recipient indices
             recipient_indices = [next(i for i, r in enumerate(self.recipients)
-                                     if r.recipient_id == rid)
+                                      if r.recipient_id == rid)
                                 for rid in recipient_ids]
             
+            # Calculate statistics
             total_boxes = sum(self.recipients[r_idx].num_items for r_idx in recipient_indices)
             utilization = total_boxes / volunteer.car_size * 100
-            travel_time, total_distance = self._calculate_route_travel_time(
-                volunteer_idx, recipient_indices)
             
+            # Calculate route with pickup location
+            travel_time, total_distance, route_coords = self._calculate_route_travel_time(
+                volunteer_idx, recipient_indices, 
+                pickup_idx=next(i for i, p in enumerate(self.pickups) if p.location_id == pickup_id)
+            )
+            
+            # Create volunteer marker with detailed popup
             volunteer_popup = f"""
             <b>Volunteer {volunteer_id}</b><br>
             Car Capacity: {volunteer.car_size} boxes<br>
             Assigned: {total_boxes} boxes ({utilization:.1f}%)<br>
+            Pickup Location: {pickup_id}<br>
             Recipients: {len(recipient_ids)}<br>
             Est. Travel: {travel_time:.1f} min ({total_distance:.1f} km)
             """
@@ -550,12 +753,26 @@ class VolunteerAssignerOpt:
                 tooltip=f"Volunteer {volunteer_id}"
             ).add_to(group)
             
+            # Draw route: Volunteer -> Pickup (blue line)
+            folium.PolyLine(
+                locations=[
+                    [volunteer.latitude, volunteer.longitude],
+                    [pickup.latitude, pickup.longitude]
+                ],
+                color='blue',
+                weight=3,
+                opacity=0.8,
+                tooltip=f"To Pickup: {self._haversine_distance(volunteer.latitude, volunteer.longitude, pickup.latitude, pickup.longitude):.1f} km"
+            ).add_to(group)
+            
+            # Create markers for each recipient
             for r_idx in recipient_indices:
                 recipient = self.recipients[r_idx]
                 recipient_popup = f"""
                 <b>Recipient {recipient.recipient_id}</b><br>
                 Boxes: {recipient.num_items}<br>
-                Assigned to: Volunteer {volunteer_id}
+                Assigned to: Volunteer {volunteer_id}<br>
+                Pickup: {pickup_id}
                 """
                 
                 folium.Marker(
@@ -565,18 +782,49 @@ class VolunteerAssignerOpt:
                     tooltip=f"Recipient {recipient.recipient_id}"
                 ).add_to(group)
                 
+                # Draw route: Pickup -> Recipient (green line)
                 folium.PolyLine(
                     locations=[
-                        [volunteer.latitude, volunteer.longitude],
+                        [pickup.latitude, pickup.longitude],
                         [recipient.latitude, recipient.longitude]
                     ],
-                    color='blue',
+                    color='green',
+                    weight=3,
+                    opacity=0.8,
+                    tooltip=f"Pickup to Recipient: {self._haversine_distance(pickup.latitude, pickup.longitude, recipient.latitude, recipient.longitude):.1f} km"
+                ).add_to(group)
+                
+                # Draw route: Recipient -> Volunteer (purple line, for return trip)
+                folium.PolyLine(
+                    locations=[
+                        [recipient.latitude, recipient.longitude],
+                        [volunteer.latitude, volunteer.longitude]
+                    ],
+                    color='purple',
                     weight=2,
-                    opacity=0.7
+                    opacity=0.6,
+                    tooltip=f"Return Trip: {self._haversine_distance(recipient.latitude, recipient.longitude, volunteer.latitude, volunteer.longitude):.1f} km"
                 ).add_to(group)
             
             group.add_to(m)
         
+        # Add legend
+        legend_html = '''
+        <div style="position: fixed; bottom: 50px; left: 50px; z-index: 1000; background-color: white; padding: 10px; border: 2px solid grey; border-radius: 5px;">
+            <h4>Route Legend</h4>
+            <div><i style="background: blue; width: 15px; height: 3px; display: inline-block;"></i> Volunteer to Pickup</div>
+            <div><i style="background: green; width: 15px; height: 3px; display: inline-block;"></i> Pickup to Recipient</div>
+            <div><i style="background: purple; width: 15px; height: 3px; display: inline-block;"></i> Return Trip</div>
+            <div style="margin-top: 5px;">
+                <i style="background: blue; width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></i> Volunteer
+                <i style="background: green; width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 5px;"></i> Pickup
+                <i style="background: red; width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 5px;"></i> Recipient
+            </div>
+        </div>
+        '''
+        m.get_root().html.add_child(folium.Element(legend_html))
+        
+        # Add layer control
         folium.LayerControl().add_to(m)
         
         if save_path:
@@ -675,14 +923,17 @@ class VolunteerAssignerOpt:
         total_volunteers = len([vid for vid, rids in self.assignment_map.items() if rids])
         total_recipients = len(self.assignments)
         total_boxes = sum(self.recipients[next(i for i, r in enumerate(self.recipients)
-                                            if r.recipient_id == rid)].num_items
-                         for _, rid in self.assignments)
+                                             if r.recipient_id == rid)].num_items
+                          for _, rid, _ in self.assignments)
         total_capacity = sum(self.volunteers[next(i for i, v in enumerate(self.volunteers)
                                               if v.volunteer_id == vid)].car_size
                             for vid, rids in self.assignment_map.items() if rids)
         overall_utilization = total_boxes / total_capacity * 100 if total_capacity > 0 else 0
         
         total_distance = 0.0
+        total_utilization = 0.0
+        volunteer_used_count = 0
+        
         for volunteer_id, recipient_ids in self.assignment_map.items():
             if not recipient_ids:
                 continue
@@ -691,7 +942,9 @@ class VolunteerAssignerOpt:
             recipient_indices = [next(i for i, r in enumerate(self.recipients)
                                      if r.recipient_id == rid)
                                 for rid in recipient_ids]
-            _, distance = self._calculate_route_travel_time(volunteer_idx, recipient_indices)
+            # Get pickup index for this volunteer
+            pickup_idx = self.volunteer_pickup_assignments.get(volunteer_idx)
+            _, distance, _ = self._calculate_route_travel_time(volunteer_idx, recipient_indices, pickup_idx)
             total_distance += distance
         
         avg_distance = total_distance / total_volunteers if total_volunteers > 0 else 0
@@ -718,39 +971,55 @@ class VolunteerAssignerOpt:
                 recipient_indices = [next(i for i, r in enumerate(self.recipients)
                                          if r.recipient_id == rid)
                                     for rid in recipient_ids]
-                travel_time, distance = self._calculate_route_travel_time(
-                    volunteer_idx, recipient_indices)
+                # Get pickup information
+                pickup_id = self.pickup_assignments.get(volunteer_id)
+                pickup = next(p for p in self.pickups if p.location_id == pickup_id)
+                
+                # Calculate volunteer to pickup distance
+                vol_to_pickup_dist = self._haversine_distance(
+                    volunteer.latitude, volunteer.longitude,
+                    pickup.latitude, pickup.longitude
+                )
+                
+                # Get pickup index for this volunteer
+                pickup_idx = self.volunteer_pickup_assignments.get(volunteer_idx)
+                travel_time, distance, _ = self._calculate_route_travel_time(
+                    volunteer_idx, recipient_indices, pickup_idx)
                 
                 report += f"### Volunteer {volunteer_id}\n\n"
                 report += f"- **Car Capacity:** {volunteer.car_size} boxes\n"
                 report += f"- **Assigned:** {total_boxes} boxes ({utilization:.1f}%)\n"
+                report += f"- **Pickup Location:** {pickup_id}\n"
+                report += f"- **Distance to Pickup:** {vol_to_pickup_dist:.2f} km\n"
                 report += f"- **Recipients:** {len(recipient_ids)}\n"
                 report += f"- **Est. Travel:** {travel_time:.1f} min ({distance:.1f} km)\n\n"
-                report += "| Recipient ID | Boxes | Distance (km) |\n"
-                report += "|-------------|-------|---------------|\n"
+                
+                # Add recipient table with pickup route information
+                report += "| Recipient ID | Boxes | Pickup to Recipient (km) | Return Trip (km) |\n"
+                report += "|-------------|-------|------------------------|----------------|\n"
+                
                 for rid in recipient_ids:
                     recipient_idx = next(i for i, r in enumerate(self.recipients)
-                                        if r.recipient_id == rid)
+                                         if r.recipient_id == rid)
                     recipient = self.recipients[recipient_idx]
-                    distance = self._haversine_distance(
-                        volunteer.latitude, volunteer.longitude,
+                    
+                    # Calculate pickup to recipient distance
+                    pickup_to_recip_dist = self._haversine_distance(
+                        pickup.latitude, pickup.longitude,
                         recipient.latitude, recipient.longitude
                     )
-                    report += f"| {recipient.recipient_id} | {recipient.num_items} | {distance:.2f} |\n"
+                    
+                    # Calculate recipient to volunteer distance (return trip)
+                    recip_to_vol_dist = self._haversine_distance(
+                        recipient.latitude, recipient.longitude,
+                        volunteer.latitude, volunteer.longitude
+                    )
+                    
+                    report += f"| {recipient.recipient_id} | {recipient.num_items} | {pickup_to_recip_dist:.2f} | {recip_to_vol_dist:.2f} |\n"
+                
                 report += "\n"
-            
-            total_utilization = 0.0
-            volunteer_used_count = 0
-            for volunteer_id, recipient_ids in self.assignment_map.items():
-                if not recipient_ids:
-                    continue
-                volunteer_idx = next(i for i, v in enumerate(self.volunteers)
-                                    if v.volunteer_id == volunteer_id)
-                volunteer = self.volunteers[volunteer_idx]
-                total_boxes = sum(self.recipients[next(i for i, r in enumerate(self.recipients)
-                                                      if r.recipient_id == rid)].num_items
-                                 for rid in recipient_ids)
-                utilization = total_boxes / volunteer.car_size * 100
+                
+                # Update statistics
                 total_utilization += utilization
                 volunteer_used_count += 1
             
