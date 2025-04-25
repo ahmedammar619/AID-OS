@@ -272,9 +272,9 @@ class VolunteerAssignerOpt:
         # Define normalized weights (all on same scale: 0-100)
         # Higher number means more importance
         weights = {
-            'distance': 100.0,            # Minimize distance between volunteer and recipient
+            'distance': 5.0,            # Minimize distance between volunteer and recipient
             'volunteer_count': 0.0,     # Minimize total number of volunteers used
-            'capacity_util': 100000.0,       # Maximize capacity utilization
+            'capacity_util': 1.0,       # Maximize capacity utilization
             'history': 0.0,             # Prefer historical matches
             'compact_routes': 0.0,      # Prefer recipients close to each other (compact routes)
             'clusters': 0.0             # Prefer keeping clustered recipients together
@@ -282,6 +282,43 @@ class VolunteerAssignerOpt:
         print("Normalized weights (higher = more important):")
         for key, value in weights.items():
             print(f"  {key}: {value}")
+
+        # --- HARD CONSTRAINTS FOR DISTANCE AND CAPACITY UTILIZATION ---
+        # These constraints ensure that the total normalized distance and average capacity utilization
+        # remain within specified bounds, regardless of the objective weights.
+        # Adjust these thresholds as needed:
+        DISTANCE_UPPER_BOUND_FACTOR = 1.1  # Allow up to 108% of minimum possible total distance
+        MIN_AVG_CAPACITY_UTIL = 0.5        # Require at least 50% average capacity utilization
+        use_constraint = True
+        if DISTANCE_UPPER_BOUND_FACTOR and MIN_AVG_CAPACITY_UTIL and use_constraint:
+            # 1. Compute minimum possible total normalized distance (assign each recipient to closest volunteer)
+            min_total_distance = 0.0
+            for r in range(self.num_recipients):
+                min_dist = min(self.distance_matrix[v, r] for v in range(self.num_volunteers))
+                min_total_distance += min_dist
+            min_total_normalized_distance = min_total_distance / distance_norm
+            distance_upper_bound = DISTANCE_UPPER_BOUND_FACTOR * min_total_normalized_distance
+            print(f"[Constraint] Upper bound for total normalized distance: {distance_upper_bound:.2f}")
+
+            # Add constraint: total normalized distance assigned <= upper bound
+            total_normalized_distance_expr = solver.Sum(
+                x[v, r] * (self.distance_matrix[v, r] / distance_norm)
+                for v in range(self.num_volunteers) for r in range(self.num_recipients)
+            )
+            solver.Add(total_normalized_distance_expr <= distance_upper_bound)
+
+            # 2. Add constraint: average capacity utilization >= threshold
+            # Compute total assigned boxes and total volunteer capacity
+            total_assigned_boxes_expr = solver.Sum(
+                x[v, r] * self.recipients[r].num_items
+                for v in range(self.num_volunteers) for r in range(self.num_recipients)
+            )
+            total_capacity = sum(v.car_size for v in self.volunteers)
+            min_total_assigned_boxes = MIN_AVG_CAPACITY_UTIL * total_capacity
+            print(f"[Constraint] Minimum total assigned boxes for utilization: {min_total_assigned_boxes:.2f} (of {total_capacity})")
+            solver.Add(total_assigned_boxes_expr >= min_total_assigned_boxes)
+
+        # --- END HARD CONSTRAINTS ---
         
         # Minimize total distance (volunteer to recipient)
         if weights['distance']:

@@ -151,7 +151,7 @@ class DatabaseHandler:
             self.engine = self._create_engine_from_config()
         else:
             # Default to local MySQL instance if no config is provided
-            self.engine = create_engine('mysql+pymysql://root:@localhost/AID_OS')
+            self.engine = create_engine('mysql+pymysql://root:@localhost/AID_RL')
         
         # Create a session factory
         self.Session = sessionmaker(bind=self.engine)
@@ -264,7 +264,7 @@ class DatabaseHandler:
         session.close()
 
 
-        return volunteers
+        return test_volunteers
     
     def get_all_recipients(self):
         """Retrieve all recipients from the database."""
@@ -274,7 +274,7 @@ class DatabaseHandler:
             # Recipient.distributor_id == None
         ).all()
         session.close()
-        return recipients
+        return test_recipients
     
     def get_all_pickups(self):
         """Retrieve all pickup locations from the database."""
