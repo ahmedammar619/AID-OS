@@ -8,6 +8,7 @@ Handles MySQL connection using SQLAlchemy.
 
 from collections import namedtuple
 import random
+import urllib.parse
 
 # Define your data structures
 Volunteer = namedtuple('Volunteer', ['volunteer_id', 'latitude', 'longitude', 'car_size'])
@@ -160,7 +161,8 @@ class DatabaseHandler:
             self.engine = self._create_engine_from_config()
         else:
             # Default to local MySQL instance if no config is provided
-            self.engine = create_engine('mysql+pymysql://root:@localhost/AID_RL')
+            # self.engine = create_engine('mysql+pymysql://root:@localhost/AID_RL')
+            self.engine = create_engine(f'mysql+pymysql://{os.environ.get("DB_USERNAME", "america1_aid")}:{urllib.parse.quote_plus(os.environ.get("DB_PASSWORD", "P@(Nz}1f]()="))}@{os.environ.get("DB_HOST", "ford.ace-host.net")}/{os.environ.get("DB_NAME", "america1_aid")}')
         
         # Create a session factory
         self.Session = sessionmaker(bind=self.engine)
@@ -258,7 +260,6 @@ class DatabaseHandler:
         # Convert zip codes to coordinates and ensure car_size is integer
         for volunteer in volunteers:
             try:
-                volunteer.car_size = int(volunteer.car_size)
                 # Convert zip code to coordinates
                 if str(volunteer.zip_code) in self.coordinates:
                     volunteer.longitude = self._get_lon_from_zip(volunteer.zip_code)
@@ -267,13 +268,16 @@ class DatabaseHandler:
                     # Default to Dallas coordinates if zip not found
                     volunteer.longitude = 32.7767
                     volunteer.latitude = -96.7970
+
+                volunteer.car_size = int(volunteer.car_size)+2
+
             except ValueError:
-                volunteer.car_size = 0.001  # Handle invalid cases
+                volunteer.car_size = 8  # Handle invalid cases
 
         session.close()
 
 
-        return test_volunteers
+        return volunteers
     
     def get_all_recipients(self):
         """Retrieve all recipients from the database."""
@@ -283,7 +287,7 @@ class DatabaseHandler:
             # Recipient.distributor_id == None
         ).all()
         session.close()
-        return test_recipients
+        return recipients
     
     def get_all_pickups(self):
         """Retrieve all pickup locations from the database."""
@@ -292,7 +296,7 @@ class DatabaseHandler:
             Pickup.active == 1  # Using 1 instead of True for MySQL
         ).all()
         session.close()
-        return test_pickups
+        return pickups
 
 
     def get_historical_deliveries(self):
