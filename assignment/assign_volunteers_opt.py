@@ -495,7 +495,7 @@ class VolunteerAssignerOpt:
         weights = {
             'distance': 5.0,            # Minimize distance between volunteer and recipient
             'volunteer_count': 0.0,     # Minimize total number of volunteers used
-            'capacity_util': 1.0,       # Maximize capacity utilization
+            'capacity_util': 0.0,       # Maximize capacity utilization
             'history': 0.0,             # Prefer historical matches
             'compact_routes': 0.0,      # Prefer recipients close to each other (compact routes)
             'clusters': 0.0             # Prefer keeping clustered recipients together
@@ -508,10 +508,11 @@ class VolunteerAssignerOpt:
         # These constraints ensure that the total normalized distance and average capacity utilization
         # remain within specified bounds, regardless of the objective weights.
         # Adjust these thresholds as needed:
-        DISTANCE_UPPER_BOUND_FACTOR = 2.0  # Allow up to 200% of minimum possible total distance
+        DISTANCE_UPPER_BOUND_FACTOR = 1.15  # Allow up to 115% of minimum possible total distance
+        MAX_ROUTE_TIME_MIN = 400.0  # 1.5 hours
         MIN_AVG_CAPACITY_UTIL = 0.4        # Require at least 40% average capacity utilization
         use_constraint = True
-        if DISTANCE_UPPER_BOUND_FACTOR and MIN_AVG_CAPACITY_UTIL and use_constraint:
+        if DISTANCE_UPPER_BOUND_FACTOR and use_constraint:
             # 1. Compute minimum possible total normalized distance with pickups
             # For each recipient, find the minimum distance through any volunteer's assigned pickup
             min_total_distance = 0.0
@@ -536,16 +537,25 @@ class VolunteerAssignerOpt:
             )
             solver.Add(total_normalized_distance_expr <= distance_upper_bound)
 
+
+            for v in range(self.num_volunteers):
+                # For each volunteer, sum the estimated travel time for all assigned recipients
+                travel_time_expr = solver.Sum(
+                    x[v, r] * (self.distance_matrix['vol_pickup_recip'][v, self.volunteer_pickup_assignments[v], r] / 30.0 * 60.0 + 5.0 + 10.0)
+                    for r in range(self.num_recipients)
+                )
+            solver.Add(travel_time_expr <= MAX_ROUTE_TIME_MIN)
+
             # 2. Add constraint: average capacity utilization >= threshold
             # Compute total assigned boxes and total volunteer capacity
-            total_assigned_boxes_expr = solver.Sum(
-                x[v, r] * self.recipients[r].num_items
-                for v in range(self.num_volunteers) for r in range(self.num_recipients)
-            )
-            total_capacity = sum(v.car_size for v in self.volunteers)
-            min_total_assigned_boxes = MIN_AVG_CAPACITY_UTIL * total_capacity
-            print(f"[Constraint] Minimum total assigned boxes for utilization: {min_total_assigned_boxes:.2f} (of {total_capacity})")
-            solver.Add(total_assigned_boxes_expr >= min_total_assigned_boxes)
+            # total_assigned_boxes_expr = solver.Sum(
+            #     x[v, r] * self.recipients[r].num_items
+            #     for v in range(self.num_volunteers) for r in range(self.num_recipients)
+            # )
+            # total_capacity = sum(v.car_size for v in self.volunteers)
+            # min_total_assigned_boxes = MIN_AVG_CAPACITY_UTIL * total_capacity
+            # print(f"[Constraint] Minimum total assigned boxes for utilization: {min_total_assigned_boxes:.2f} (of {total_capacity})")
+            # solver.Add(total_assigned_boxes_expr >= min_total_assigned_boxes)
 
         # --- END HARD CONSTRAINTS ---
         
@@ -995,6 +1005,89 @@ class VolunteerAssignerOpt:
             
             group.add_to(m)
         
+        # --- STATISTICS PANEL & HIDE BUTTON ---
+        # Compute statistics
+        total_volunteers = len([vid for vid, rids in self.assignment_map.items() if rids])
+        total_recipients = sum(len(rids) for rids in self.assignment_map.values())
+        route_lengths = []
+        total_distance = 0
+        utilizations = []
+        for volunteer_id, recipient_ids in self.assignment_map.items():
+            if not recipient_ids:
+                continue
+            volunteer_idx = next(i for i, v in enumerate(self.volunteers) if v.volunteer_id == volunteer_id)
+            recipient_indices = [next(i for i, r in enumerate(self.recipients) if r.recipient_id == rid) for rid in recipient_ids]
+            pickup_id = self.pickup_assignments.get(volunteer_id)
+            if pickup_id is None:
+                continue
+            pickup_idx = next(i for i, p in enumerate(self.pickups) if p.location_id == pickup_id)
+            _, route_dist, _ = self._calculate_route_travel_time(volunteer_idx, recipient_indices, pickup_idx=pickup_idx)
+            route_lengths.append(route_dist)
+            total_distance += route_dist
+            total_boxes = sum(self.recipients[r_idx].num_items for r_idx in recipient_indices)
+            volunteer = self.volunteers[volunteer_idx]
+            utilizations.append(total_boxes / volunteer.car_size * 100)
+        avg_route_length = sum(route_lengths) / len(route_lengths) if route_lengths else 0
+        avg_utilization = sum(utilizations) / len(utilizations) if utilizations else 0
+        
+        stats_html = f'''
+        <div id="stats-panel" style="position: fixed; bottom: 50px; right: 50px; z-index: 1001; background-color: white; padding: 14px; border: 2px solid #666; border-radius: 8px; display: none; min-width: 250px;">
+            <h4 style="margin-top:0">Assignment Statistics</h4>
+            <ul style="padding-left: 1.2em;">
+                <li><b>Total Volunteers:</b> {total_volunteers}</li>
+                <li><b>Total Recipients:</b> {total_recipients}</li>
+                <li><b>Avg. Route Length:</b> {avg_route_length:.2f} km</li>
+                <li><b>Total Distance:</b> {total_distance:.2f} km</li>
+                <li><b>Avg. Utilization:</b> {avg_utilization:.1f}%</li>
+            </ul>
+            <button onclick="document.getElementById('stats-panel').style.display='none'" style="margin-top:8px;">Close</button>
+        </div>
+        <button id="toggle-stats-btn" style="position: fixed; bottom: 10px; right: 10px; z-index: 1002; background-color: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">Show Statistics</button>
+        '''
+        
+        # JavaScript for toggling stats and adding Toggle All Volunteers to LayerControl
+        js_code = '''
+        <script>
+        // Toggle statistics panel
+        document.getElementById('toggle-stats-btn').onclick = function() {
+            var panel = document.getElementById('stats-panel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        };
+        // Wait for LayerControl to be available, then add Toggle All Volunteers
+        function addToggleAllVolunteers() {
+            var layerControl = document.getElementsByClassName('leaflet-control-layers-overlays')[0];
+            if (!layerControl) { setTimeout(addToggleAllVolunteers, 500); return; }
+            // Only add if not already present
+            if (document.getElementById('toggle-all-volunteers-row')) return;
+            var row = document.createElement('label');
+            row.id = 'toggle-all-volunteers-row';
+            row.style.display = 'block';
+            row.style.cursor = 'pointer';
+            row.style.marginTop = '8px';
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = true;
+            cb.style.marginRight = '6px';
+            row.appendChild(cb);
+            var text = document.createTextNode('Show All Volunteers');
+            row.appendChild(text);
+            layerControl.insertBefore(row, layerControl.firstChild);
+            cb.onchange = function() {
+                var allInputs = layerControl.querySelectorAll('input[type=checkbox]');
+                for (var i = 0; i < allInputs.length; i++) {
+                    var label = allInputs[i].parentElement;
+                    if (label.textContent.trim().startsWith('Volunteer')) {
+                        if (allInputs[i].checked !== cb.checked) {
+                            allInputs[i].click();
+                        }
+                    }
+                }
+            };
+        }
+        setTimeout(addToggleAllVolunteers, 1000);
+        </script>
+        '''
+        
         # Add legend
         legend_html = '''
         <div style="position: fixed; bottom: 50px; left: 50px; z-index: 1000; background-color: white; padding: 10px; border: 2px solid grey; border-radius: 5px;">
@@ -1009,6 +1102,8 @@ class VolunteerAssignerOpt:
             </div>
         </div>
         '''
+        m.get_root().html.add_child(folium.Element(stats_html))
+        m.get_root().html.add_child(folium.Element(js_code))
         m.get_root().html.add_child(folium.Element(legend_html))
         
         # Add layer control
