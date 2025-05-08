@@ -109,6 +109,7 @@ class AgentTrainer:
         
         try:
             for episode in range(1, num_episodes + 1):
+                print(f"Episode {episode}/{num_episodes}")
                 self.current_episode = episode
                 
                 # Reset environment
@@ -127,22 +128,22 @@ class AgentTrainer:
                 
                 # Episode loop
                 for step in range(max_steps):
+                    print(f"Step {step}/{max_steps}")
                     # Select action (now returns action, prob, log_prob)
                     action, prob, log_prob = self.agent.select_action(state, env)
-                    
+                    print(f"Action taken")
                     # Take step in environment
                     next_state, reward, done, info = env.step(action)
-                    
+                    print(f"Next state")
                     # Store transition
                     states.append(state)
                     actions.append(action)
                     rewards.append(reward)
                     next_states.append(next_state)
                     dones.append(done)
-                    
+                    print(f"Transition stored")
                     # Update agent with new transition (now includes log_prob for PPO)
                     self.agent.store_transition(state, action, reward, next_state, done, log_prob)
-                    
                     # Update state and counters
                     state = next_state
                     episode_reward += reward

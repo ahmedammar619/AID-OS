@@ -141,7 +141,7 @@ def train_agent(args):
     # Create database handler
     db_handler = DatabaseHandler()
     
-    max_steps = 60
+    max_steps = 300
 
     # Create environment
     env = DeliveryEnv(db_handler=db_handler, max_steps=max_steps, use_clustering=True, cluster_eps=0.00005)
@@ -161,10 +161,10 @@ def train_agent(args):
     # Training loops
     stats = trainer.train(
         env=env,
-        num_episodes=6000,
+        num_episodes=4000,
         max_steps=max_steps,
         print_interval=10,
-        checkpoint_interval=1000,
+        checkpoint_interval=500,
         agent_num_updates=3
     )
     

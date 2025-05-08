@@ -106,7 +106,6 @@ class ActorCriticAgent:
         
         # Get action from the actor with action masking
         action, action_prob = self.actor.select_action(state_tensor, env, deterministic)
-        
         # For PPO, we also need the log probability
         if action != -1:  # Only compute log_prob for valid actions
             action_tensor = torch.LongTensor([action]).to(self.device)
