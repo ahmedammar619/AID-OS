@@ -691,6 +691,7 @@ class DeliveryEnv(gym.Env):
         
         # Update state
         self.state = self._compute_state()
+        print(f"State updated")
         
         # Increment step counter
         self.current_step += 1
@@ -710,7 +711,7 @@ class DeliveryEnv(gym.Env):
                         break
             if valid_actions_exist: 
                 break
-    
+        print(f"Valid actions check")
         if not valid_actions_exist or self.current_step >= self.max_steps:
             done = True
 
@@ -720,6 +721,7 @@ class DeliveryEnv(gym.Env):
             num_unassigned = self.num_recipients - len(self.assigned_recipients)
             unassigned_penalty = -5.0 * num_unassigned  # Increased penalty for unassigned recipients
             reward += unassigned_penalty
+            print(f"Unassigned penalty: {unassigned_penalty}")
             
             # 2. Reward for efficient volunteer usage
             if len(self.assigned_recipients) > 0:  # Only if we've made some assignments
@@ -746,6 +748,7 @@ class DeliveryEnv(gym.Env):
                 # Reward based on percentage of volunteers with high utilization
                 high_util_percentage = high_utilization_count / active_volunteers if active_volunteers > 0 else 0
                 high_util_reward = 10.0 * high_util_percentage
+                print(f"High utilization reward: {high_util_reward}")
                 
                 # Reward for using fewer volunteers (relative to total recipients)
                 volunteer_efficiency = 1.0 - (active_volunteers / self.num_volunteers)
@@ -784,7 +787,7 @@ class DeliveryEnv(gym.Env):
                         # Extra penalty for routes with any very distant points
                         if max_distance > 15:  # Any stops more than 15km apart
                             route_efficiency_reward -= 3.0
-                
+                print(f"Route efficiency reward: {route_efficiency_reward}")
                 # Add all rewards
                 efficiency_reward = high_util_reward + volunteer_count_reward + route_efficiency_reward
                 reward += efficiency_reward
