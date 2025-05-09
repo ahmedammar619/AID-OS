@@ -11,41 +11,41 @@ import random
 import urllib.parse
 
 # Define your data structures
-Volunteer = namedtuple('Volunteer', ['volunteer_id', 'latitude', 'longitude', 'car_size'])
-Recipient = namedtuple('Recipient', ['recipient_id', 'latitude', 'longitude', 'num_items'])
-Pickup = namedtuple('Pickup', ['location_id', 'latitude', 'longitude', 'num_items', 'active'])
+# Volunteer = namedtuple('Volunteer', ['volunteer_id', 'latitude', 'longitude', 'car_size'])
+# Recipient = namedtuple('Recipient', ['recipient_id', 'latitude', 'longitude', 'num_items'])
+# Pickup = namedtuple('Pickup', ['location_id', 'latitude', 'longitude', 'num_items', 'active'])
 
-# 20 volunteers spread over a city grid
-random.seed(42)
-test_volunteers = [
-    Volunteer(i,
-        34.00  + random.uniform(-0.1,0.1),
-        -118.25 + random.uniform(-0.1,0.1),
-        random.choice([6, 8, 10, 12, 15, 20])
-    )
-    for i in range(1,21)
-]
+# # 20 volunteers spread over a city grid
+# random.seed(42)
+# test_volunteers = [
+#     Volunteer(i,
+#         34.00  + random.uniform(-0.1,0.1),
+#         -118.25 + random.uniform(-0.1,0.1),
+#         random.choice([6, 8, 10, 12, 15, 20])
+#     )
+#     for i in range(1,21)
+# ]
 
-# 50 recipients: most need 1 box, a few outliers need 10–30
-test_recipients = []
-for i in range(1,51):
-    lat = 34.00  + random.uniform(-0.15,0.15)
-    lon = -118.25 + random.uniform(-0.15,0.15)
-    if i % 20 == 0:
-        boxes = random.choice([10,20,30])   # big outlier every 20th
-    elif i % 7 == 0:
-        boxes = random.choice([5,8,12])     # medium outlier every 7th
-    else:
-        boxes = 1                           # typical case
-    test_recipients.append(Recipient(i, lat, lon, boxes))
+# # 50 recipients: most need 1 box, a few outliers need 10–30
+# test_recipients = []
+# for i in range(1,51):
+#     lat = 34.00  + random.uniform(-0.15,0.15)
+#     lon = -118.25 + random.uniform(-0.15,0.15)
+#     if i % 20 == 0:
+#         boxes = random.choice([10,20,30])   # big outlier every 20th
+#     elif i % 7 == 0:
+#         boxes = random.choice([5,8,12])     # medium outlier every 7th
+#     else:
+#         boxes = 1                           # typical case
+#     test_recipients.append(Recipient(i, lat, lon, boxes))
     
-# 2 pickup locations (centrally located distribution centers)
-test_pickups = [
-    # Downtown distribution center
-    Pickup(1, 34.05, -118.25, 500, 1),  # Central Los Angeles location with high capacity
-    # West side distribution center
-    Pickup(2, 34.02, -118.40, 300, 1)   # West LA location (closer to Santa Monica)
-]
+# # 2 pickup locations (centrally located distribution centers)
+# test_pickups = [
+#     # Downtown distribution center
+#     Pickup(1, 34.05, -118.25, 500, 1),  # Central Los Angeles location with high capacity
+#     # West side distribution center
+#     Pickup(2, 34.02, -118.40, 300, 1)   # West LA location (closer to Santa Monica)
+# ]
 
 # Quick sanity prints
 # print("Volunteers:", len(test_volunteers))
@@ -229,14 +229,19 @@ class DatabaseHandler:
         "75454": {"lat": 33.2979, "lon": -96.5737},  # Melissa, Collin County
         "76002": {"lat": 32.6279, "lon": -97.0977},  # Arlington, Tarrant County
         "76006": {"lat": 32.7759, "lon": -97.0817},  # Arlington, Tarrant County
+        "76013": {"lat": 32.72, "lon": -97.16},  # Arlington, Tarrant County
+        "76016": {"lat": 32.69, "lon": -97.19},  # Arlington, Tarrant County
         "76010": {"lat": 32.7329, "lon": -97.0777},  # Arlington, Tarrant County
         "76039": {"lat": 32.6959, "lon": -97.0157},  # Euless, Tarrant County
         "76040": {"lat": 32.8239, "lon": -97.0207},  # Euless, Tarrant County
         "76051": {"lat": 32.9339, "lon": -97.0877},  # Grapevine, Tarrant County
+        "76053": {"lat": 32.82, "lon": -97.17},  # Hust, Tarrant County
+        "76063": {"lat": 32.57, "lon": -97.13},  # Mansfield, Tarrant County
         "76102": {"lat": 32.7559, "lon": -97.3297},  # Fort Worth, Tarrant County
         "76104": {"lat": 32.7289, "lon": -97.3217},  # Fort Worth, Tarrant County
         "76119": {"lat": 32.6919, "lon": -97.2707},  # Fort Worth, Tarrant County
-        "76134": {"lat": 32.6479, "lon": -97.3287}   # Fort Worth, Tarrant County
+        "76134": {"lat": 32.6479, "lon": -97.3287},  # Fort Worth, Tarrant County
+        "76123": {"lat": 32.62, "lon": -97.39}   # Fort Worth, Tarrant County
     }
 
     def _get_lat_from_zip(self, zip_code):
@@ -254,7 +259,7 @@ class DatabaseHandler:
         """Retrieve all volunteers from the database and convert zip codes to coordinates."""
         session = self.Session()
         volunteers = session.query(Volunteer).filter(
-            (Volunteer.replied == 'Delivery') | (Volunteer.replied == 'Both')
+            # (Volunteer.replied == 'Delivery') | (Volunteer.replied == 'Both')
         ).all()
 
         # Convert zip codes to coordinates and ensure car_size is integer
@@ -269,7 +274,7 @@ class DatabaseHandler:
                     volunteer.longitude = 32.7767
                     volunteer.latitude = -96.7970
 
-                volunteer.car_size = int(volunteer.car_size)+2
+                # volunteer.car_size = int(volunteer.car_size)+2
 
             except ValueError:
                 volunteer.car_size = 8  # Handle invalid cases
@@ -283,7 +288,7 @@ class DatabaseHandler:
         """Retrieve all recipients from the database."""
         session = self.Session()
         recipients = session.query(Recipient).filter(
-            Recipient.replied == 'Yes',
+            # Recipient.replied == 'Yes',
             # Recipient.distributor_id == None
         ).all()
         session.close()
