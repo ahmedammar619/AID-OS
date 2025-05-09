@@ -225,257 +225,51 @@ def calculate_assignment_stats(data):
     
     return stats
 
-def run_optimized_assignments(admin_data, show_maps=True, output_dir='./hist/output'):
+# def run_optimized_assignments(admin_data, show_maps=True, output_dir='./hist/output'):
+
+
+def run_optimized_assignments(admin_data, show_maps=False, output_dir='./hist/output'):
     """Run an optimized assignment algorithm that uses the same volunteers and recipients as in admin_data."""
-    print("Running optimized assignment algorithm...")
     
     # Create a new data structure for optimized assignments
     from collections import namedtuple, defaultdict
     
     Volunteer = namedtuple('Volunteer', ['volunteer_id', 'latitude', 'longitude', 'car_size'])
     Recipient = namedtuple('Recipient', ['recipient_id', 'latitude', 'longitude', 'num_items'])
-    
-    # Use the same volunteers and recipients as in admin_data
-    # This ensures we're only working with volunteers and recipients that appear in the delivery table
-    volunteers = []
-    for v in admin_data['volunteers']:
-        # Skip volunteers without coordinates or car size
-        if not v.latitude or not v.longitude or not v.car_size:
-            continue
-            
-        try:
-            car_size = int(v.car_size) if isinstance(v.car_size, str) else v.car_size
-        except (ValueError, TypeError):
-            car_size = 6  # Default
-            
-        volunteers.append(Volunteer(
-            volunteer_id=v.volunteer_id,
-            latitude=v.latitude,
-            longitude=v.longitude,
-            car_size=car_size
-        ))
-    
-    print(f"Total volunteers from delivery table: {len(volunteers)}")
-    
-    recipients = []
-    for r in admin_data['recipients']:
-        try:
-            num_items = int(r.num_items) if isinstance(r.num_items, str) else r.num_items
-        except (ValueError, TypeError):
-            num_items = 1  # Default
-            
-        recipients.append(Recipient(
-            recipient_id=r.recipient_id,
-            latitude=r.latitude,
-            longitude=r.longitude,
-            num_items=num_items
-        ))
-    
-    pickups = admin_data['pickups'][:]
-    
-    print(f"Total volunteers available: {len(volunteers)}")
-    print(f"Total recipients to assign: {len(recipients)}")
-    print(f"Total pickup locations: {len(pickups)}")
-    
-    # Assign each volunteer to their closest pickup
-    volunteer_pickup = {}
-    for v in volunteers:
-        closest_pickup = min(pickups, key=lambda p: 
-                          haversine_distance(v.latitude, v.longitude, p.latitude, p.longitude))
-        volunteer_pickup[v.volunteer_id] = closest_pickup.location_id
-    
-    # Calculate distance matrix between volunteers and recipients
-    # This will help us make more distance-efficient assignments
-    distance_matrix = {}
-    for v in volunteers:
-        pickup_id = volunteer_pickup[v.volunteer_id]
-        pickup = next(p for p in pickups if p.location_id == pickup_id)
-        
-        # Calculate volunteer -> pickup distance
-        vol_to_pickup = haversine_distance(
-            v.latitude, v.longitude,
-            pickup.latitude, pickup.longitude
-        )
-        
-        for r in recipients:
-            # Calculate pickup -> recipient distance
-            pickup_to_recipient = haversine_distance(
-                pickup.latitude, pickup.longitude,
-                r.latitude, r.longitude
-            )
-            
-            # Total route distance: volunteer -> pickup -> recipient -> pickup -> volunteer
-            # We're assuming the volunteer returns to the pickup after each delivery
-            total_distance = vol_to_pickup + (2 * pickup_to_recipient) + vol_to_pickup
-            
-            distance_matrix[(v.volunteer_id, r.recipient_id)] = total_distance
-    
-    # Track remaining capacity for each volunteer
-    remaining_capacity = {v.volunteer_id: v.car_size for v in volunteers}
-    
-    # Initialize assignments
-    assignments = []
-    assignment_map = defaultdict(list)
-    
-    # Track assigned recipients to avoid duplicates
-    assigned_recipients = set()
-    
-    # Sort recipients by number of boxes (descending) to assign larger deliveries first
-    sorted_recipients = sorted(recipients, key=lambda r: r.num_items, reverse=True)
-    
-    # First pass: assign recipients to volunteers based on distance and capacity
-    for recipient in sorted_recipients:
-        # Skip if already assigned
-        if recipient.recipient_id in assigned_recipients:
-            continue
-            
-        # Find all valid volunteer-recipient pairs sorted by distance
-        valid_assignments = []
-        for volunteer in volunteers:
-            # Check if volunteer has enough capacity
-            if remaining_capacity[volunteer.volunteer_id] >= recipient.num_items:
-                # Get the distance for this volunteer-recipient pair
-                distance = distance_matrix.get((volunteer.volunteer_id, recipient.recipient_id))
-                if distance is not None:
-                    pickup_id = volunteer_pickup[volunteer.volunteer_id]
-                    valid_assignments.append((volunteer, distance, pickup_id))
-        
-        # Sort by distance (ascending)
-        valid_assignments.sort(key=lambda x: x[1])
-        
-        # Assign to closest volunteer with capacity
-        if valid_assignments:
-            best_volunteer, _, pickup_id = valid_assignments[0]
-            
-            # Assign recipient to best volunteer
-            assignments.append((best_volunteer.volunteer_id, recipient.recipient_id, pickup_id))
-            assignment_map[best_volunteer.volunteer_id].append(recipient.recipient_id)
-            assigned_recipients.add(recipient.recipient_id)
-            
-            # Update remaining capacity
-            remaining_capacity[best_volunteer.volunteer_id] -= recipient.num_items
-            
-            # Debug output
-            print(f"Assigned recipient {recipient.recipient_id} ({recipient.num_items} boxes) to volunteer {best_volunteer.volunteer_id} (remaining capacity: {remaining_capacity[best_volunteer.volunteer_id]})")
-        else:
-            print(f"Could not assign recipient {recipient.recipient_id} ({recipient.num_items} boxes) - no volunteer with enough capacity")
-    
-    # Second pass: try to assign any remaining recipients to any volunteer with capacity
-    unassigned_recipients = [r for r in recipients if r.recipient_id not in assigned_recipients]
-    if unassigned_recipients:
-        print(f"\nAttempting to assign {len(unassigned_recipients)} remaining recipients...")
-        
-        # Sort by number of boxes (ascending) to fit smaller ones first
-        unassigned_recipients.sort(key=lambda r: r.num_items)
-        
-        for recipient in unassigned_recipients:
-            # Sort volunteers by remaining capacity (descending)
-            sorted_volunteers = sorted(volunteers, key=lambda v: remaining_capacity[v.volunteer_id], reverse=True)
-            
-            # Find first volunteer with enough capacity
-            best_volunteer = None
-            for volunteer in sorted_volunteers:
-                if remaining_capacity[volunteer.volunteer_id] >= recipient.num_items:
-                    best_volunteer = volunteer
-                    pickup_id = volunteer_pickup[volunteer.volunteer_id]
-                    break
-            
-            # Only assign if we found a volunteer with capacity
-            if best_volunteer is not None:
-                # Assign recipient to best volunteer
-                assignments.append((best_volunteer.volunteer_id, recipient.recipient_id, pickup_id))
-                assignment_map[best_volunteer.volunteer_id].append(recipient.recipient_id)
-                assigned_recipients.add(recipient.recipient_id)
-                
-                # Update remaining capacity
-                remaining_capacity[best_volunteer.volunteer_id] -= recipient.num_items
-                
-                print(f"Assigned recipient {recipient.recipient_id} ({recipient.num_items} boxes) to volunteer {best_volunteer.volunteer_id} (remaining capacity: {remaining_capacity[best_volunteer.volunteer_id]})")
-            else:
-                print(f"Could not assign recipient {recipient.recipient_id} ({recipient.num_items} boxes) - no volunteer with enough capacity")
-    
-    # Third pass: try to distribute assignments to use more volunteers
-    # This helps when we have volunteers with the same coordinates
-    used_volunteers = [v_id for v_id, r_ids in assignment_map.items() if r_ids]
-    unused_volunteers = [v.volunteer_id for v in volunteers if v.volunteer_id not in used_volunteers]
-    
-    if unused_volunteers and used_volunteers:
-        print(f"\nRedistributing assignments to use more volunteers...")
-        print(f"Currently using {len(used_volunteers)} of {len(volunteers)} volunteers")
-        
-        # For each unused volunteer, try to take some assignments from a used volunteer
-        for unused_vol_id in unused_volunteers:
-            # Find the unused volunteer
-            unused_vol = next(v for v in volunteers if v.volunteer_id == unused_vol_id)
-            unused_vol_pickup = volunteer_pickup[unused_vol_id]
-            
-            # Find volunteers with the most assignments
-            used_vols_with_assignments = [(v_id, assignment_map[v_id]) for v_id in used_volunteers if assignment_map[v_id]]
-            used_vols_with_assignments.sort(key=lambda x: len(x[1]), reverse=True)
-            
-            # Try to take assignments from the volunteer with the most assignments
-            for used_vol_id, recipient_ids in used_vols_with_assignments:
-                if not recipient_ids:  # Skip if no assignments left
-                    continue
-                    
-                # Find the used volunteer
-                used_vol = next(v for v in volunteers if v.volunteer_id == used_vol_id)
-                
-                # Check if they have the same pickup location (to minimize distance changes)
-                if volunteer_pickup[used_vol_id] == unused_vol_pickup:
-                    # Take one recipient from this volunteer
-                    recipient_id = recipient_ids[0]  # Take the first recipient
-                    recipient = next(r for r in recipients if r.recipient_id == recipient_id)
-                    
-                    # Check if the unused volunteer has capacity
-                    if remaining_capacity[unused_vol_id] >= recipient.num_items:
-                        # Remove from current volunteer
-                        assignment_map[used_vol_id].remove(recipient_id)
-                        remaining_capacity[used_vol_id] += recipient.num_items
-                        
-                        # Assign to unused volunteer
-                        assignment_map[unused_vol_id].append(recipient_id)
-                        remaining_capacity[unused_vol_id] -= recipient.num_items
-                        
-                        # Update assignments list
-                        # First remove the old assignment
-                        assignments = [(v, r, p) for v, r, p in assignments if not (v == used_vol_id and r == recipient_id)]
-                        # Then add the new assignment
-                        assignments.append((unused_vol_id, recipient_id, unused_vol_pickup))
-                        
-                        print(f"Moved recipient {recipient_id} from volunteer {used_vol_id} to volunteer {unused_vol_id}")
-                        
-                        # Mark this volunteer as used now
-                        used_volunteers.append(unused_vol_id)
-                        break  # Move to next unused volunteer
-    
+
+    opt_agent = VolunteerAssignerOpt(data=admin_data, output_dir=output_dir, use_clustering=False)
+    opt_agent.generate_assignments()    
+
+    volunteers = opt_agent.volunteers
+    recipients = opt_agent.recipients
+    assigned_recipients = opt_agent.assigned_recipients
     # Final count of volunteers used
-    final_used_volunteers = [v_id for v_id, r_ids in assignment_map.items() if r_ids]
+    final_used_volunteers = [v_id for v_id, r_ids in opt_agent.assignment_map.items() if r_ids]
     print(f"\nAfter redistribution: Using {len(final_used_volunteers)} of {len(volunteers)} volunteers")
     
     # Print assignment summary
     print(f"\nAssignment summary:")
     print(f"Total recipients assigned: {len(assigned_recipients)} of {len(recipients)}")
-    print(f"Total volunteers used: {len([v for v, r in assignment_map.items() if r])} of {len(volunteers)}")
+    print(f"Total volunteers used: {len([v for v, r in opt_agent.assignment_map.items() if r])} of {len(volunteers)}")
     
     # Check for empty assignments
-    if not assignments:
+    if not opt_agent.assignments:
         print("WARNING: No assignments were made! Using admin assignments as fallback.")
         return None
     
     # Calculate volunteer box counts
     volunteer_box_counts = {}
-    for vol_id, rec_ids in assignment_map.items():
+    for vol_id, rec_ids in opt_agent.assignment_map.items():
         total_boxes = sum(r.num_items for r in recipients if r.recipient_id in rec_ids)
         volunteer_box_counts[vol_id] = total_boxes
     
     # Create optimized data dictionary
     opt_data = {
-        'assignments': assignments,
+        'assignments': opt_agent.assignments,
         'volunteers': volunteers,
         'recipients': recipients,
-        'assignment_map': dict(assignment_map),  # Convert defaultdict to regular dict
-        'pickups': pickups,
+        'assignment_map': dict(opt_agent.assignment_map),  # Convert defaultdict to regular dict
+        'pickups': opt_agent.pickups,
         'volunteer_box_counts': volunteer_box_counts
     }
     

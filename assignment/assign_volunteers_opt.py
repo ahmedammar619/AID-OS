@@ -44,7 +44,8 @@ class VolunteerAssignerOpt:
         feedback_handler=None,
         use_clustering=True,
         cluster_eps=0.00005,
-        output_dir="./hist/output"
+        output_dir="./hist/output",
+        data=None
     ):
         """
         Initialize the volunteer assigner.
@@ -81,21 +82,50 @@ class VolunteerAssignerOpt:
         self.cluster_eps = cluster_eps
         
         # Load data and initialize clustering
-        self._load_data()
+        self._load_data(data)
         if use_clustering:
             self._initialize_clustering()
         
         # Create distance matrix
         self.distance_matrix = self._create_distance_matrix()
     
-    def _load_data(self):
+    def _load_data(self, data=None):
         """Load volunteer, recipient, pickup, and historical data from the database."""
-        self.volunteers = self.db_handler.get_all_volunteers()
+        if data is None:
+            # Get all volunteers and filter out those with invalid coordinates
+            all_volunteers = self.db_handler.get_all_volunteers()
+            self.volunteers = [v for v in all_volunteers if v.latitude is not None and v.longitude is not None]
+            
+            # Get all recipients and filter out those with invalid coordinates
+            all_recipients = self.db_handler.get_all_recipients()
+            self.recipients = [r for r in all_recipients if r.latitude is not None and r.longitude is not None]
+        else:
+            # Filter volunteers from provided data
+            self.volunteers = [v for v in data['volunteers'] if v.latitude is not None and v.longitude is not None]
+            
+            # Filter recipients from provided data
+            self.recipients = [r for r in data['recipients'] if r.latitude is not None and r.longitude is not None]
+        
+        # Ensure car_size and num_items are integers
+        for v in self.volunteers:
+            try:
+                v.car_size = int(v.car_size) if isinstance(v.car_size, str) else v.car_size
+            except (ValueError, TypeError):
+                v.car_size = 6  # Default car size if conversion fails
+        
+        for r in self.recipients:
+            try:
+                r.num_items = int(r.num_items) if isinstance(r.num_items, str) else r.num_items
+            except (ValueError, TypeError):
+                r.num_items = 1  # Default to 1 box if conversion fails
+        
+        # Update counts after filtering
         self.num_volunteers = len(self.volunteers)
-        
-        self.recipients = self.db_handler.get_all_recipients()
         self.num_recipients = len(self.recipients)
+        print(f"Using {self.num_volunteers} volunteers with valid coordinates")
+        print(f"Using {self.num_recipients} recipients with valid coordinates")
         
+        # Get pickups and historical data
         self.pickups = self.db_handler.get_all_pickups()
         self.num_pickups = len(self.pickups)
         
@@ -511,7 +541,7 @@ class VolunteerAssignerOpt:
         DISTANCE_UPPER_BOUND_FACTOR = 1.15  # Allow up to 115% of minimum possible total distance
         MAX_ROUTE_TIME_MIN = 400.0  # 1.5 hours
         MIN_AVG_CAPACITY_UTIL = 0.4        # Require at least 40% average capacity utilization
-        use_constraint = True
+        use_constraint = False
         if DISTANCE_UPPER_BOUND_FACTOR and use_constraint:
             # 1. Compute minimum possible total normalized distance with pickups
             # For each recipient, find the minimum distance through any volunteer's assigned pickup
@@ -660,7 +690,8 @@ class VolunteerAssignerOpt:
         
         status = solver.Solve()
         end_time = time.time()
-        
+        self.assigned_recipients = []
+
         if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
             print(f"Solution found in {end_time - start_time:.2f} seconds!")
             print(f"Objective value = {objective.Value()}")
@@ -690,6 +721,7 @@ class VolunteerAssignerOpt:
                         # Store as (volunteer_id, recipient_id, pickup_id)
                         self.assignments.append((volunteer_id, recipient_id, pickup_id))
                         self.assignment_map[volunteer_id].append(recipient_id)
+                        self.assigned_recipients.append(recipient_id)
             
             return True
         else:
