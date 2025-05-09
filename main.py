@@ -26,6 +26,7 @@ from training.train_agent import AgentTrainer
 from feedback.feedback_handler import FeedbackHandler
 from assignment.assign_volunteers import VolunteerAssigner
 from assignment.assign_volunteers_opt import VolunteerAssignerOpt
+from assignment.compare_with_admin import get_admin_assignments, run_optimized_assignments, calculate_assignment_stats, compare_assignments
 
 
 def setup_parser():
@@ -74,6 +75,12 @@ def setup_parser():
     compare_parser = subparsers.add_parser('compare', help='Compare RL and optimization approaches')
     compare_parser.add_argument('--agent', type=str, help='Path to trained agent checkpoint')
     compare_parser.add_argument('--output-dir', type=str, default='./hist/output', help='Directory to save output files')
+    
+    # Compare with admin assignments command
+    compare_admin_parser = subparsers.add_parser('compare-admin', help='Compare admin assignments with optimized assignments')
+    compare_admin_parser.add_argument('--output-dir', type=str, default='./hist/output', help='Directory to save output files')
+    compare_admin_parser.add_argument('--show-maps', action='store_true', help='Display interactive maps for comparison')
+    compare_admin_parser.add_argument('--print-stats', action='store_true', help='Print statistics for comparison')
     
     # Clustering command
     cluster_parser = subparsers.add_parser('map', help='Cluster recipients')
@@ -499,6 +506,57 @@ def compare_approaches(args):
     # print(f"\nComparison completed! Report saved to {report_path}")
     print(f"Comparison plot saved to {plot_path}")
 
+def compare_with_admin(args):
+    """Compare admin assignments with optimized assignments.
+    
+    This function:
+    1. Fetches current admin assignments from the delivery table
+    2. Runs the optimization algorithm on the same dataset
+    3. Compares the results (distance, utilization, etc.)
+    4. Optionally displays interactive maps for visual comparison
+    
+    Args:
+        args: Command line arguments
+    """
+    print("Comparing admin assignments with optimized assignments...")
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Get admin assignments
+    admin_data = get_admin_assignments()
+    
+    if not admin_data:
+        print("No admin assignments found in the delivery table. Cannot proceed with comparison.")
+        return
+    
+    # Calculate admin assignment statistics
+    admin_stats = calculate_assignment_stats(admin_data)
+    admin_data['stats'] = admin_stats
+    
+    # Print admin assignment statistics if requested
+    if args.print_stats:
+        print(f"\nAdmin Assignment Statistics:")
+        print(f"Total Volunteers: {admin_stats['total_volunteers']}")
+        print(f"Total Recipients: {admin_stats['total_recipients']}")
+        print(f"Total Distance: {admin_stats['total_distance']:.2f} km")
+        print(f"Average Route Length: {admin_stats['avg_route_length']:.2f} km")
+        print(f"Average Utilization: {admin_stats['avg_utilization']:.1f}%")
+    
+    # Run optimization on the same dataset
+    print(f"\nRunning optimization on the same dataset...")
+    result = run_optimized_assignments(admin_data, show_maps=args.show_maps, output_dir=args.output_dir)
+    
+    if result:
+        admin_stats, opt_stats, admin_map_path, opt_map_path = result
+        
+        # Display comparison between admin and optimized assignments
+        if args.print_stats:
+            compare_assignments(admin_stats, opt_stats)
+    else:
+        print("\nOptimization failed. Only showing admin assignments.")
+
+
 def main():
     """Main function to parse arguments and run commands."""
     parser = setup_parser()
@@ -527,6 +585,8 @@ def main():
         run_pipeline_opt(args)
     elif args.command == 'compare':
         compare_approaches(args)
+    elif args.command == 'compare-admin':
+        compare_with_admin(args)
     elif args.command == 'feedback':
         handle_feedback(args)
     else:

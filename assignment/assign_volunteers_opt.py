@@ -493,7 +493,7 @@ class VolunteerAssignerOpt:
         # Define normalized weights (all on same scale: 0-100)
         # Higher number means more importance
         weights = {
-            'distance': 5.0,            # Minimize distance between volunteer and recipient
+            'distance': 1.0,            # Minimize distance between volunteer and recipient
             'volunteer_count': 0.0,     # Minimize total number of volunteers used
             'capacity_util': 0.0,       # Maximize capacity utilization
             'history': 0.0,             # Prefer historical matches
