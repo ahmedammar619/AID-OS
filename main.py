@@ -27,6 +27,7 @@ from feedback.feedback_handler import FeedbackHandler
 from assignment.assign_volunteers import VolunteerAssigner
 from assignment.assign_volunteers_opt import VolunteerAssignerOpt
 from assignment.compare_with_admin import get_admin_assignments, run_optimized_assignments, calculate_assignment_stats, compare_assignments
+from models.weight_optimizer import WeightOptimizer
 
 
 def setup_parser():
@@ -81,6 +82,13 @@ def setup_parser():
     compare_admin_parser.add_argument('--output-dir', type=str, default='./hist/output', help='Directory to save output files')
     compare_admin_parser.add_argument('--show-maps', action='store_true', help='Display interactive maps for comparison')
     compare_admin_parser.add_argument('--print-stats', action='store_true', help='Print statistics for comparison')
+    
+    # Optimize weights command
+    optimize_weights_parser = subparsers.add_parser('optimize-weights', help='Optimize weights for volunteer assignment algorithm')
+    optimize_weights_parser.add_argument('--output-dir', type=str, default='./hist/output', help='Directory to save output files')
+    optimize_weights_parser.add_argument('--iterations', type=int, default=10, help='Number of iterations to run')
+    optimize_weights_parser.add_argument('--population', type=int, default=5, help='Population size for each iteration')
+    optimize_weights_parser.add_argument('--timeout', type=int, default=60, help='Timeout in seconds for each evaluation')
     
     # Clustering command
     cluster_parser = subparsers.add_parser('map', help='Cluster recipients')
@@ -545,7 +553,15 @@ def compare_with_admin(args):
     
     # Run optimization on the same dataset
     print(f"\nRunning optimization on the same dataset...")
-    result = run_optimized_assignments(admin_data, show_maps=args.show_maps, output_dir=args.output_dir)
+
+    weights = {
+        'total_distance': 1.0,
+        'avg_route_length': 1.0,
+        'avg_utilization': 1.0,
+        'total_volunteers': 1.0,
+        'total_recipients': 1.0
+    }
+    result = run_optimized_assignments(admin_data, show_maps=args.show_maps, output_dir=args.output_dir, custom_weights=None, save_report=False)
     
     if result:
         admin_stats, opt_stats, admin_map_path, opt_map_path = result
@@ -555,6 +571,39 @@ def compare_with_admin(args):
             compare_assignments(admin_stats, opt_stats)
     else:
         print("\nOptimization failed. Only showing admin assignments.")
+
+
+def optimize_weights(args):
+    """Optimize weights for the volunteer assignment algorithm using neural networks.
+    
+    This function uses a neural network approach to find the optimal weights for the
+    volunteer assignment optimization algorithm. It runs multiple iterations of the
+    optimization process, evaluating different weight combinations and learning from
+    the results to find the best weights.
+    
+    Args:
+        args: Command line arguments containing optimization parameters.
+    """
+    print("Starting weight optimization process...")
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Initialize the weight optimizer
+    optimizer = WeightOptimizer(output_dir=args.output_dir)
+    
+    # Run the optimization process
+    best_weights, best_score, _ = optimizer.optimize(
+        num_iterations=args.iterations,
+        population_size=args.population,
+        timeout=args.timeout
+    )
+    
+    # Print the final results
+    print("\nWeight optimization completed!")
+    print(f"Best weights found: {best_weights}")
+    print(f"Best score: {best_score:.4f}")
+    print(f"Results saved to {args.output_dir}")
 
 
 def main():
@@ -587,6 +636,8 @@ def main():
         compare_approaches(args)
     elif args.command == 'compare-admin':
         compare_with_admin(args)
+    elif args.command == 'optimize-weights':
+        optimize_weights(args)
     elif args.command == 'feedback':
         handle_feedback(args)
     else:

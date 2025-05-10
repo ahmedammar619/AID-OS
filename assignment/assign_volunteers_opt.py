@@ -42,7 +42,7 @@ class VolunteerAssignerOpt:
         self,
         db_handler=None,
         feedback_handler=None,
-        use_clustering=True,
+        use_clustering=False,
         cluster_eps=0.00005,
         output_dir="./hist/output",
         data=None
@@ -426,7 +426,7 @@ class VolunteerAssignerOpt:
         
         return travel_time, total_distance, route_coords
     
-    def generate_assignments(self):
+    def generate_assignments(self, custom_weights=None):
         """
         Solve the volunteer-recipient assignment problem using OR-Tools MILP.
         The model now includes pickup locations in the routing, but with a simplified approach.
@@ -522,14 +522,17 @@ class VolunteerAssignerOpt:
         
         # Define normalized weights (all on same scale: 0-100)
         # Higher number means more importance
-        weights = {
-            'distance': 1.0,            # Minimize distance between volunteer and recipient
-            'volunteer_count': 0.0,     # Minimize total number of volunteers used
-            'capacity_util': 0.0,       # Maximize capacity utilization
-            'history': 0.0,             # Prefer historical matches
-            'compact_routes': 0.0,      # Prefer recipients close to each other (compact routes)
-            'clusters': 0.0             # Prefer keeping clustered recipients together
-        }
+        if custom_weights:
+            weights = custom_weights
+        else:
+            weights = {
+                'distance': 10.0,            # Minimize distance between volunteer and recipient
+                'volunteer_count': 10.0,     # Minimize total number of volunteers used
+                'capacity_util': 0.0,       # Maximize capacity utilization
+                'history': 0.0,             # Prefer historical matches
+                'compact_routes': 0.0,      # Prefer recipients close to each other (compact routes)
+                'clusters': 0.0             # Prefer keeping clustered recipients together
+            }
         print("Normalized weights (higher = more important):")
         for key, value in weights.items():
             print(f"  {key}: {value}")

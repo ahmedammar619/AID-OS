@@ -225,10 +225,7 @@ def calculate_assignment_stats(data):
     
     return stats
 
-# def run_optimized_assignments(admin_data, show_maps=True, output_dir='./hist/output'):
-
-
-def run_optimized_assignments(admin_data, show_maps=False, output_dir='./hist/output'):
+def run_optimized_assignments(admin_data, show_maps=False, output_dir='./hist/output', save_report=False, custom_weights=None):
     """Run an optimized assignment algorithm that uses the same volunteers and recipients as in admin_data."""
     
     # Create a new data structure for optimized assignments
@@ -238,7 +235,7 @@ def run_optimized_assignments(admin_data, show_maps=False, output_dir='./hist/ou
     Recipient = namedtuple('Recipient', ['recipient_id', 'latitude', 'longitude', 'num_items'])
 
     opt_agent = VolunteerAssignerOpt(data=admin_data, output_dir=output_dir, use_clustering=False)
-    opt_agent.generate_assignments()    
+    opt_agent.generate_assignments(custom_weights=custom_weights)    
 
     volunteers = opt_agent.volunteers
     recipients = opt_agent.recipients
@@ -299,7 +296,8 @@ def run_optimized_assignments(admin_data, show_maps=False, output_dir='./hist/ou
             'route_color': 'purple'
         },
         save_path=admin_map_path,
-        show=show_maps
+        show=show_maps,
+        save_report=save_report
     )
     
     # Create optimized assignment map
@@ -319,7 +317,8 @@ def run_optimized_assignments(admin_data, show_maps=False, output_dir='./hist/ou
             'route_color': 'blue'
         },
         save_path=opt_map_path,
-        show=show_maps
+        show=show_maps,
+        save_report=save_report
     )
     
     return admin_stats, opt_stats, admin_map_path, opt_map_path
@@ -340,12 +339,14 @@ def compare_assignments(admin_stats, opt_stats):
         ('Avg Route Length (km)', 'avg_route_length', 2),
         ('Avg Utilization (%)', 'avg_utilization', 1)
     ]
-    
+    pct_changes = []
     for label, key, decimals in metrics:
         admin_val = admin_stats[key]
         opt_val = opt_stats[key]
         diff = opt_val - admin_val
         pct_change = (diff / admin_val * 100) if admin_val != 0 else 0
+
+        pct_changes.append(pct_change)
         
         # Format with appropriate decimals
         admin_str = f"{admin_val:.{decimals}f}" if decimals > 0 else f"{admin_val}"
@@ -359,41 +360,4 @@ def compare_assignments(admin_stats, opt_stats):
     print("Note: Negative difference/change means the optimized assignment is better (lower).")
     print("      Positive difference/change for utilization means better (higher).")
 
-def main():
-    """Main function to run the comparison."""
-    admin_data = get_admin_assignments()
-    
-    if not admin_data:
-        print("No admin assignments found. Cannot run optimization without assignments.")
-        return
-    
-    # Calculate admin stats
-    admin_stats = calculate_assignment_stats(admin_data)
-    admin_data['stats'] = admin_stats
-    
-    # Print admin assignment statistics
-    print(f"\nAdmin Assignment Statistics:")
-    print(f"Total Volunteers: {admin_stats['total_volunteers']}")
-    print(f"Total Recipients: {admin_stats['total_recipients']}")
-    print(f"Total Distance: {admin_stats['total_distance']:.2f} km")
-    print(f"Average Route Length: {admin_stats['avg_route_length']:.2f} km")
-    print(f"Average Utilization: {admin_stats['avg_utilization']:.1f}%")
-    
-    print(f"\nRunning optimization on the same dataset...")
-    result = run_optimized_assignments(admin_data)
-    
-    if result:
-        admin_stats, opt_stats, admin_map_path, opt_map_path = result
-        
-        # Display comparison between admin and optimized assignments
-        compare_assignments(admin_stats, opt_stats)
-        
-        # Open maps in browser
-        print("\nOpening maps in browser for comparison...")
-        # webbrowser.open('file://' + os.path.abspath(admin_map_path))
-        # webbrowser.open('file://' + os.path.abspath(opt_map_path))
-    else:
-        print("\nOptimization failed. Only showing admin assignments.")
-
-if __name__ == "__main__":
-    main()
+    return pct_changes
