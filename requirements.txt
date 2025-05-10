@@ -13,3 +13,4 @@ folium==0.14.0
 geopy==2.3.0
 hdbscan>=0.8.33
 ortools>=9.6.2534
+tensorflow>=2.12.0

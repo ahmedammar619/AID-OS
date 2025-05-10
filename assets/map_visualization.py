@@ -4,7 +4,7 @@ import webbrowser
 import numpy as np
 import os
 
-def visualize_assignments(data, title="Assignment Map", config=None, save_path=None, show=True):
+def visualize_assignments(data, title="Assignment Map", config=None, save_path=None, show=True, save_report=True):
     """
     Visualize volunteer-recipient assignments using a Folium map, including pickup locations.
     Shows the complete route: volunteer -> pickup -> recipients -> volunteer.
@@ -19,6 +19,7 @@ def visualize_assignments(data, title="Assignment Map", config=None, save_path=N
                 - 'assignment_map': Dict mapping volunteer_id to list of recipient_ids
                 - 'volunteer_box_counts': Dict mapping volunteer_id to number of boxes
                 - 'stats': Optional dict with statistics
+                - 'save_report': Optional bool to save report
             For object (from second/third functions):
                 - Attributes: volunteers, recipients, assignments, pickup_assignments, assignment_map
                 - volunteers: List of objects with latitude, longitude, car_size, volunteer_id (optional)
@@ -489,7 +490,7 @@ def visualize_assignments(data, title="Assignment Map", config=None, save_path=N
     folium.LayerControl().add_to(m)
     
     # Save or show
-    if save_path:
+    if save_path and save_report:
         m.save(save_path)
         print(f"Map saved to {save_path}")
     
