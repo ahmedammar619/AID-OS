@@ -84,11 +84,12 @@ def setup_parser():
     compare_admin_parser.add_argument('--print-stats', action='store_true', help='Print statistics for comparison')
     
     # Optimize weights command
-    optimize_weights_parser = subparsers.add_parser('optimize-weights', help='Optimize weights for volunteer assignment algorithm')
-    optimize_weights_parser.add_argument('--output-dir', type=str, default='./hist/output', help='Directory to save output files')
-    optimize_weights_parser.add_argument('--iterations', type=int, default=10, help='Number of iterations to run')
+    optimize_weights_parser = subparsers.add_parser('optimize-weights', help='Optimize assignment weights')
+    optimize_weights_parser.add_argument('--iterations', type=int, default=10, help='Number of optimization iterations')
     optimize_weights_parser.add_argument('--population', type=int, default=5, help='Population size for each iteration')
     optimize_weights_parser.add_argument('--timeout', type=int, default=60, help='Timeout in seconds for each evaluation')
+    optimize_weights_parser.add_argument('--output-dir', type=str, default='./hist/output', help='Directory to save results')
+    optimize_weights_parser.add_argument('--disable', nargs='*', default=[], help='Weights to disable (e.g., history clusters distance volunteer_count compact_routes capacity_util)')
     
     # Clustering command
     cluster_parser = subparsers.add_parser('map', help='Cluster recipients')
@@ -574,36 +575,34 @@ def compare_with_admin(args):
 
 
 def optimize_weights(args):
-    """Optimize weights for the volunteer assignment algorithm using neural networks.
-    
-    This function uses a neural network approach to find the optimal weights for the
-    volunteer assignment optimization algorithm. It runs multiple iterations of the
-    optimization process, evaluating different weight combinations and learning from
-    the results to find the best weights.
+    """
+    Run the weight optimizer with command-line arguments.
     
     Args:
-        args: Command line arguments containing optimization parameters.
+        num_iterations (int): Number of iterations.
+        population_size (int): Weight sets per iteration.
+        timeout (int): Max seconds per evaluation.
+        disabled_weights (set): Weights to disable (e.g., {'history', 'clusters'}).
     """
-    print("Starting weight optimization process...")
+    admin_data = get_admin_assignments()
+    if not admin_data:
+        print("No admin assignments found")
+        return
     
-    # Create output directory if it doesn't exist
-    os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Initialize the weight optimizer
-    optimizer = WeightOptimizer(output_dir=args.output_dir)
-    
-    # Run the optimization process
+    optimizer = WeightOptimizer(admin_data)
+    if args.disable:
+        disabled_weights = set(args.disable)
+    else:
+        disabled_weights = None
+
     best_weights, best_score, _ = optimizer.optimize(
         num_iterations=args.iterations,
         population_size=args.population,
-        timeout=args.timeout
+        timeout=args.timeout,
+        disabled_weights=disabled_weights
     )
-    
-    # Print the final results
-    print("\nWeight optimization completed!")
-    print(f"Best weights found: {best_weights}")
-    print(f"Best score: {best_score:.4f}")
-    print(f"Results saved to {args.output_dir}")
+    print(f"\nBest Weights: {best_weights}")
+    print(f"Best Score: {best_score:.2f}")
 
 
 def main():

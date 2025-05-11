@@ -4,8 +4,9 @@
 """
 Weight Optimizer for Volunteer Assignment System
 
-This module uses a neural network approach to find the optimal weights for the
-volunteer assignment optimization algorithm.
+This module optimizes weights for the volunteer assignment system using a neural network.
+It evaluates weight combinations against admin assignments and learns to predict better weights.
+Supports disabling specific weights to focus optimization on selected objectives.
 """
 
 import os
@@ -15,13 +16,12 @@ import random
 import numpy as np
 import signal
 from datetime import datetime
-from collections import defaultdict
 import tensorflow as tf
 from tensorflow import keras
 from keras import layers
 import matplotlib.pyplot as plt
 
-# Add parent directory to path to import from project modules
+# Add parent directory to path for project imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from assignment.compare_with_admin import get_admin_assignments, run_optimized_assignments, compare_assignments
 
@@ -30,555 +30,437 @@ class TimeoutException(Exception):
     pass
 
 def timeout_handler(signum, frame):
-    """Handler for SIGALRM signal."""
+    """Handle SIGALRM signal for timeouts."""
     raise TimeoutException("Function execution timed out")
 
 class WeightOptimizer:
     """
-    Neural network-based optimizer for finding the best weights for the volunteer assignment system.
+    Optimizes weights for volunteer assignment using a neural network and iterative evaluation.
     
-    This class uses a combination of genetic algorithms and neural networks to explore
-    the weight space and find the optimal weights that produce the best assignment results.
+    Features:
+    - Evaluates weights by comparing OR-Tools assignments to admin assignments.
+    - Trains a neural network to predict better weights.
+    - Supports disabling specific weights (e.g., set 'history' to 0).
+    - Saves results and plots optimization progress.
     """
     
-    def __init__(self, output_dir="./hist/output"):
+    def __init__(self, admin_data, output_dir="./hist/output"):
         """
-        Initialize the weight optimizer.
+        Initialize the optimizer.
         
         Args:
-            output_dir (str): Directory to save output files.
+            admin_data (dict): Admin assignments data from database.
+            output_dir (str): Directory to save results and plots.
         """
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
         
-        # Get admin assignments from the database
-        self.admin_data = get_admin_assignments()
-        if not self.admin_data:
-            raise ValueError("No admin assignments found in the database.")
+        # Validate and store admin data
+        self.admin_data = admin_data
+        if not admin_data:
+            raise ValueError("No admin assignments provided.")
         
-        # Calculate admin stats
-        self.admin_stats = self.admin_data.get('stats', None)
+        # Compute admin stats if not present
+        self.admin_stats = admin_data.get('stats')
         if not self.admin_stats:
             from assignment.compare_with_admin import calculate_assignment_stats
-            self.admin_stats = calculate_assignment_stats(self.admin_data)
+            self.admin_stats = calculate_assignment_stats(admin_data)
             self.admin_data['stats'] = self.admin_stats
         
-        # Initialize weights and results storage
+        # Weight ranges (allow negative weights for flexibility)
+        self.weight_params = {
+            'distance': (-20.0, 20.0),
+            'volunteer_count': (-20.0, 20.0),
+            'capacity_util': (-20.0, 20.0),
+            'history': (-20.0, 20.0),
+            'compact_routes': (-20.0, 20.0),
+            'clusters': (-20.0, 20.0)
+        }
+        
+        # Track best weights and results
         self.best_weights = None
         self.best_score = float('inf')
         self.results_history = []
         
-        # Weight parameter ranges
-        self.weight_params = {
-            'distance': (0.0, 20.0),
-            'volunteer_count': (0.0, 20.0),
-            'capacity_util': (0.0, 20.0),
-            'history': (0.0, 10.0),
-            'compact_routes': (0.0, 10.0),
-            'clusters': (0.0, 10.0)
-        }
-        
-        # Neural network for weight prediction
+        # Build neural network
         self.model = self._build_model()
-        
+    
     def _build_model(self):
         """
-        Build and compile the neural network model for weight optimization.
+        Create a neural network to predict optimal weights.
         
         Returns:
-            keras.Model: Compiled neural network model.
+            keras.Model: Compiled neural network.
         """
         model = keras.Sequential([
-            layers.Dense(64, activation='relu', input_shape=(len(self.weight_params),)),
-            layers.Dense(128, activation='relu'),
+            layers.Dense(32, activation='relu', input_shape=(len(self.weight_params),)),
             layers.Dense(64, activation='relu'),
-            layers.Dense(len(self.weight_params), activation='sigmoid')
+            layers.Dense(32, activation='relu'),
+            layers.Dense(len(self.weight_params), activation='tanh')  # [-1,1] for weights
         ])
-        
-        model.compile(
-            optimizer=keras.optimizers.Adam(learning_rate=0.001),
-            loss='mse'
-        )
-        
+        model.compile(optimizer='adam', loss='mse')
         return model
     
     def _normalize_weights(self, weights_dict):
         """
-        Normalize weights to the appropriate ranges.
+        Normalize weights to [0,1] for neural network training.
         
         Args:
-            weights_dict (dict): Dictionary of weight values.
-            
+            weights_dict (dict): Weight values.
+        
         Returns:
-            dict: Dictionary of normalized weight values.
+            dict: Normalized weights.
         """
         normalized = {}
         for key, value in weights_dict.items():
-            min_val, max_val = self.weight_params.get(key, (0.0, 1.0))
-            normalized[key] = value * (max_val - min_val) + min_val
-        
+            min_val, max_val = self.weight_params[key]
+            normalized[key] = (value - min_val) / (max_val - min_val)
         return normalized
     
     def _denormalize_weights(self, normalized_weights):
         """
-        Denormalize weights from [0,1] to their original ranges.
+        Convert normalized weights [0,1] back to original ranges.
         
         Args:
-            normalized_weights (np.array): Array of normalized weight values.
-            
+            normalized_weights (np.array): Normalized weight values.
+        
         Returns:
-            dict: Dictionary of denormalized weight values.
+            dict: Denormalized weights.
         """
         weights_dict = {}
         for i, key in enumerate(self.weight_params.keys()):
-            min_val, max_val = self.weight_params.get(key, (0.0, 1.0))
-            weights_dict[key] = (normalized_weights[i] - min_val) / (max_val - min_val)
-        
+            min_val, max_val = self.weight_params[key]
+            # Scale [-1,1] to original range
+            scaled = (normalized_weights[i] + 1) / 2  # Convert [-1,1] to [0,1]
+            weights_dict[key] = min_val + scaled * (max_val - min_val)
         return weights_dict
     
     def _evaluate_weights(self, weights, timeout=60):
         """
-        Evaluate a set of weights by running the optimization and comparing with admin assignments.
+        Evaluate weights by running OR-Tools and comparing to admin assignments.
         
         Args:
-            weights (dict): Dictionary of weight values.
-            timeout (int): Maximum time in seconds to allow for evaluation.
-            
+            weights (dict): Weight values.
+            timeout (int): Max seconds for evaluation.
+        
         Returns:
-            float: Score representing how good the weights are (lower is better).
-            list: Percentage changes for each metric.
+            float: Score (lower is better).
+            list: Percentage changes in metrics.
         """
-        # Skip evaluation if weights are too extreme (to avoid long-running optimizations)
-        max_weight_value = 20.0
+        # Skip extreme weights
         for key, value in weights.items():
-            if value > max_weight_value:
-                print(f"  Skipping evaluation due to extreme weight value: {key}={value}")
+            if abs(value) > 20.0:
+                print(f"Skipping evaluation: {key}={value} too extreme")
                 return float('inf'), [0, 0, 0, 0, 0]
         
-        # Set up timeout
+        # Set timeout
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(timeout)
         
         try:
-            # Run optimization with these weights
+            # Run OR-Tools with weights
             result = run_optimized_assignments(
-                self.admin_data, 
-                show_maps=False, 
+                self.admin_data,
+                show_maps=False,
                 output_dir=self.output_dir,
                 save_report=False,
                 custom_weights=weights
             )
-            
             if not result:
-                # If optimization failed, return a very high score
                 return float('inf'), [0, 0, 0, 0, 0]
             
-            # Get stats and compare
+            # Compare metrics
             admin_stats, opt_stats, _, _ = result
             pct_changes = compare_assignments(admin_stats, opt_stats)
             
-            # Calculate score based on percentage changes
-            # Negative values for total_volunteers and total_distance are good
-            # Positive values for avg_utilization are good
-            # For avg_route_length, it depends on the context, but generally negative is better
-            
-            # Define weights for each metric in the score calculation
+            # Calculate score: prioritize distance and utilization
             metric_weights = {
-                'total_volunteers': 1.0,  # Weight for volunteer count change
-                'total_distance': 2.0,    # Weight for total distance change
-                'avg_route_length': 0.5,  # Weight for route length change
-                'avg_utilization': 1.5    # Weight for utilization change
+                'total_volunteers': 0.3,  # Less focus on volunteer count
+                'total_distance': 2.0,    # Minimize distance
+                'avg_route_length': 5.0,  # Minimize route length
+                'avg_utilization': 1.5    # Maximize utilization
             }
-            
-            # Calculate weighted score
             score = (
-                metric_weights['total_volunteers'] * pct_changes[0] +  # total_volunteers change
-                metric_weights['total_distance'] * pct_changes[2] +    # total_distance change
-                metric_weights['avg_route_length'] * pct_changes[3] -  # avg_route_length change
-                metric_weights['avg_utilization'] * pct_changes[4]     # avg_utilization change (negative is better)
+                metric_weights['total_volunteers'] * max(pct_changes[0], 0) +  # Penalize positive, ignore negative
+                metric_weights['total_distance'] * max(pct_changes[2], 0) +    # Penalize positive, ignore negative
+                metric_weights['avg_route_length'] * max(pct_changes[3], 0) +  # Penalize positive, ignore negative
+                metric_weights['avg_utilization'] * max(-pct_changes[4], 0)    # Penalize negative, reward positive
             )
             
-            # Add penalty for extreme changes (to avoid unrealistic solutions)
-            if abs(pct_changes[0]) > 50 or abs(pct_changes[2]) > 50 or abs(pct_changes[3]) > 50 or abs(pct_changes[4]) > 50:
-                score += 100  # Add penalty for extreme changes
-            
+            # Penalize extreme changes
+            if any(abs(change) > 50 for change in pct_changes):
+                score += 100
             return score, pct_changes
-            
+        
         except TimeoutException:
-            print(f"  Evaluation timed out after {timeout} seconds")
+            print(f"Evaluation timed out after {timeout}s")
             return float('inf'), [0, 0, 0, 0, 0]
         except Exception as e:
-            print(f"  Error during evaluation: {str(e)}")
+            print(f"Evaluation error: {e}")
             return float('inf'), [0, 0, 0, 0, 0]
         finally:
-            # Cancel the alarm
             signal.alarm(0)
     
-    def _generate_random_weights(self, num_samples=10):
+    def _generate_random_weights(self, num_samples, disabled_weights=None):
         """
-        Generate random weight combinations.
+        Generate random weight combinations, respecting disabled weights.
         
         Args:
-            num_samples (int): Number of random weight combinations to generate.
-            
+            num_samples (int): Number of weight sets to generate.
+            disabled_weights (set): Weights to set to 0 (e.g., {'history'}).
+        
         Returns:
             list: List of weight dictionaries.
         """
+        disabled = disabled_weights or set()
         weights_list = []
         for _ in range(num_samples):
             weights = {}
             for key, (min_val, max_val) in self.weight_params.items():
-                weights[key] = random.uniform(min_val, max_val)
+                weights[key] = 0.0 if key in disabled else random.uniform(min_val, max_val)
             weights_list.append(weights)
-        
         return weights_list
     
     def _train_model(self, weights_data, scores):
         """
-        Train the neural network on weights and their scores.
+        Train the neural network on evaluated weights and scores.
         
         Args:
             weights_data (list): List of weight dictionaries.
-            scores (list): List of scores for each weight combination.
+            scores (list): Corresponding scores.
         """
-        # Convert weights to numpy array
+        # Prepare training data
         X = np.array([[w[key] for key in self.weight_params.keys()] for w in weights_data])
-        
-        # Normalize X to [0,1] range for each feature
         X_norm = np.zeros_like(X)
         for i, key in enumerate(self.weight_params.keys()):
             min_val, max_val = self.weight_params[key]
             X_norm[:, i] = (X[:, i] - min_val) / (max_val - min_val)
         
-        # Convert scores to normalized target values (higher score = worse)
-        # We invert and normalize scores so that better weights have higher values
-        max_score = max(scores)
-        min_score = min(scores)
+        # Normalize scores to [0,1], invert so lower scores are better
+        min_score, max_score = min(scores), max(scores)
         score_range = max_score - min_score if max_score > min_score else 1.0
+        y = np.array([1.0 - (score - min_score) / score_range for score in scores])
+        y = np.clip(y, 0.0, 1.0)[:, None] * X_norm  # Scale normalized weights
         
-        # For each weight, set its target value based on its score
-        # Better weights (lower scores) get higher target values
-        y = np.zeros_like(X_norm)
-        for i, score in enumerate(scores):
-            # Normalize score to [0,1] range and invert (1 = best, 0 = worst)
-            normalized_score = 1.0 - ((score - min_score) / score_range)
-            # Set all weights for this sample to the normalized score
-            y[i] = X_norm[i] * normalized_score
-        
-        # Train the model
-        self.model.fit(X_norm, y, epochs=50, batch_size=4, verbose=0)
+        # Train
+        self.model.fit(X_norm, y, epochs=30, batch_size=8, verbose=0)
     
-    def _predict_better_weights(self, num_predictions=5):
+    def _predict_better_weights(self, num_predictions, disabled_weights=None):
         """
-        Use the trained model to predict better weight combinations.
+        Predict new weight combinations using the neural network.
         
         Args:
-            num_predictions (int): Number of weight combinations to predict.
-            
+            num_predictions (int): Number of predictions.
+            disabled_weights (set): Weights to set to 0.
+        
         Returns:
-            list: List of predicted weight dictionaries.
+            list: Predicted weight dictionaries.
         """
-        # Generate random starting points
-        random_weights = np.random.random((num_predictions, len(self.weight_params)))
+        disabled = disabled_weights or set()
+        random_inputs = np.random.random((num_predictions, len(self.weight_params)))
+        predicted = self.model.predict(random_inputs, verbose=0)
         
-        # Predict better weights
-        predicted_weights = self.model.predict(random_weights, verbose=0)
-        
-        # Convert to weight dictionaries
         weights_list = []
-        for weights in predicted_weights:
-            weights_dict = {}
-            for i, key in enumerate(self.weight_params.keys()):
-                min_val, max_val = self.weight_params[key]
-                weights_dict[key] = weights[i] * (max_val - min_val) + min_val
+        for weights in predicted:
+            weights_dict = self._denormalize_weights(weights)
+            for key in disabled:
+                weights_dict[key] = 0.0
             weights_list.append(weights_dict)
-        
         return weights_list
     
-    def optimize(self, num_iterations=10, population_size=5, timeout=60):
+    def optimize(self, num_iterations=10, population_size=5, timeout=60, disabled_weights=None):
         """
-        Run the optimization process to find the best weights.
+        Run optimization to find the best weights.
         
         Args:
-            num_iterations (int): Number of iterations to run.
-            population_size (int): Number of weight combinations to evaluate in each iteration.
-            timeout (int): Maximum time in seconds to allow for each evaluation.
-            
+            num_iterations (int): Number of iterations.
+            population_size (int): Weight sets per iteration.
+            timeout (int): Max seconds per evaluation.
+            disabled_weights (set): Weights to disable (e.g., {'history', 'clusters'}).
+        
         Returns:
-            dict: Best weights found.
-            float: Best score achieved.
+            dict: Best weights.
+            float: Best score.
             list: History of results.
         """
-        print(f"Starting weight optimization with {num_iterations} iterations...")
+        print(f"Starting optimization ({num_iterations} iterations, {population_size} sets)")
+        disabled = disabled_weights or set()
         start_time = time.time()
         
-        # Set default weights in case we don't find better ones
+        # Default weights
         default_weights = {
             'distance': 10.0,
-            'volunteer_count': 10.0,
-            'capacity_util': 0.0,
+            'volunteer_count': 5.0,
+            'capacity_util': 5.0,
             'history': 0.0,
             'compact_routes': 0.0,
             'clusters': 0.0
         }
+        for key in disabled:
+            default_weights[key] = 0.0
         
-        # Evaluate default weights first
-        print("\nEvaluating default weights first:")
-        print(f"  Weights: {default_weights}")
+        # Evaluate default weights
+        print("\nTesting default weights:")
+        print(f"Weights: {default_weights}")
         score, pct_changes = self._evaluate_weights(default_weights, timeout)
-        
-        # Initialize best weights with default weights
         if score < float('inf'):
             self.best_weights = default_weights.copy()
             self.best_score = score
-            print(f"  Default weights score: {score:.2f}")
-            print(f"  Percentage changes: {pct_changes}")
-            
-            # Store results
             self.results_history.append({
                 'weights': default_weights.copy(),
                 'score': score,
-                'pct_changes': pct_changes.copy(),
+                'pct_changes': pct_changes,
                 'iteration': 0
             })
+            print(f"Score: {score:.2f}, Changes: {pct_changes}")
         else:
-            print("  Default weights evaluation failed or timed out.")
-            # Still initialize with default weights but don't claim they're good
+            print("Default weights failed")
             self.best_weights = default_weights.copy()
-            self.best_score = float('inf')
         
-        # Initial population with random weights (more conservative values)
-        weights_population = []
-        for _ in range(population_size):
-            weights = {}
-            for key, (min_val, max_val) in self.weight_params.items():
-                # Use more conservative ranges to avoid extreme values
-                conservative_max = min(15.0, max_val)
-                weights[key] = random.uniform(0.0, conservative_max)
-            weights_population.append(weights)
+        # Main loop
+        weights_data = []
+        scores = []
+        for iteration in range(1, num_iterations + 1):
+            print(f"\nIteration {iteration}/{num_iterations}")
+            
+            # Generate population
+            population = self._generate_random_weights(population_size, disabled)
+            
+            # Evaluate population
+            for i, weights in enumerate(population, 1):
+                print(f"Evaluating set {i}/{population_size}: {weights}")
+                score, pct_changes = self._evaluate_weights(weights, timeout)
+                
+                if score < float('inf'):
+                    print(f"Score: {score:.2f}, Changes: {pct_changes}")
+                    weights_data.append(weights)
+                    scores.append(score)
+                    self.results_history.append({
+                        'weights': weights.copy(),
+                        'score': score,
+                        'pct_changes': pct_changes,
+                        'iteration': iteration
+                    })
+                    if score < self.best_score:
+                        self.best_score = score
+                        self.best_weights = weights.copy()
+                        print("New best weights found!")
+                else:
+                    print("Evaluation failed")
+            
+            # Train model if enough data
+            if len(weights_data) >= 4:
+                print("Training neural network...")
+                self._train_model(weights_data, scores)
+                # Generate new population: mix best, random, and predicted
+                population = [self.best_weights.copy()]
+                population += self._generate_random_weights(population_size // 2, disabled)
+                population += self._predict_better_weights(population_size - len(population), disabled)
+            else:
+                population = self._generate_random_weights(population_size, disabled)
         
-        for iteration in range(num_iterations):
-            print(f"\nIteration {iteration+1}/{num_iterations}")
-            
-            # Evaluate all weights in the population
-            scores = []
-            pct_changes_list = []
-            
-            for i, weights in enumerate(weights_population):
-                print(f"  Evaluating weight combination {i+1}/{len(weights_population)}")
-                print(f"  Weights: {weights}")
-                
-                # Skip evaluation if too similar to previously evaluated weights
-                skip = False
-                for prev_result in self.results_history:
-                    similarity = sum(abs(weights.get(k, 0) - prev_result['weights'].get(k, 0)) 
-                                  for k in self.weight_params.keys())
-                    if similarity < 1.0:  # Very similar weights
-                        print(f"  Skipping evaluation (too similar to previous weights)")
-                        score = prev_result['score']
-                        pct_changes = prev_result['pct_changes']
-                        skip = True
-                        break
-                
-                if not skip:
-                    score, pct_changes = self._evaluate_weights(weights, timeout)
-                
-                scores.append(score)
-                pct_changes_list.append(pct_changes)
-                
-                print(f"  Score: {score:.2f}")
-                print(f"  Percentage changes: {pct_changes}")
-                
-                # Update best weights if better
-                if score < self.best_score:
-                    self.best_score = score
-                    self.best_weights = weights.copy()
-                    print(f"  New best weights found! Score: {score:.2f}")
-            
-            # Store results
-            for weights, score, pct_changes in zip(weights_population, scores, pct_changes_list):
-                self.results_history.append({
-                    'weights': weights.copy(),
-                    'score': score,
-                    'pct_changes': pct_changes.copy(),
-                    'iteration': iteration + 1
-                })
-            
-            # Train the model on all data collected so far
-            all_weights = [result['weights'] for result in self.results_history]
-            all_scores = [result['score'] for result in self.results_history]
-            self._train_model(all_weights, all_scores)
-            
-            # Generate new population with the model
-            weights_population = self._predict_better_weights(population_size)
-            
-            # Add some random weights to maintain diversity
-            if iteration < num_iterations - 1:  # Skip in the last iteration
-                num_random = max(1, population_size // 5)
-                random_weights = []
-                for _ in range(num_random):
-                    weights = {}
-                    for key, (min_val, max_val) in self.weight_params.items():
-                        # Use more conservative ranges to avoid extreme values
-                        conservative_max = min(15.0, max_val)
-                        weights[key] = random.uniform(0.0, conservative_max)
-                    random_weights.append(weights)
-                weights_population = weights_population[:-num_random] + random_weights
-            
-            # Print current best
-            print(f"Current best weights: {self.best_weights}")
-            print(f"Current best score: {self.best_score:.2f}")
-            
-            # Early stopping if we found a very good solution
-            if self.best_score < -50:  # Very good score threshold
-                print("Found an excellent solution, stopping early.")
-                break
-        
-        # Final evaluation with the best weights
+        # Final evaluation
         print("\nFinal evaluation with best weights:")
-        print(f"Best weights: {self.best_weights}")
-        
-        # Run optimization with best weights
+        print(f"Weights: {self.best_weights}")
         result = run_optimized_assignments(
-            self.admin_data, 
-            show_maps=True,  # Show maps for the final result
+            self.admin_data,
+            show_maps=True,
             output_dir=self.output_dir,
             save_report=True,
             custom_weights=self.best_weights
         )
-        
         if result:
-            admin_stats, opt_stats, admin_map_path, opt_map_path = result
-            pct_changes = compare_assignments(admin_stats, opt_stats)
-            
-            print(f"Final percentage changes: {pct_changes}")
-            print(f"Admin map: {admin_map_path}")
-            print(f"Optimized map: {opt_map_path}")
+            _, _, admin_map, opt_map = result
+            print(f"Admin map: {admin_map}\nOptimized map: {opt_map}")
         
-        end_time = time.time()
-        print(f"\nOptimization completed in {end_time - start_time:.2f} seconds")
-        
-        # Save results to file
+        # Save results
         self._save_results()
-        
+        print(f"\nCompleted in {time.time() - start_time:.1f}s")
         return self.best_weights, self.best_score, self.results_history
     
     def _save_results(self):
-        """Save optimization results to file."""
+        """Save results to a text file and plot progress."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_file = os.path.join(self.output_dir, f"weight_optimization_results_{timestamp}.txt")
         
-        # Use default weights if no good weights were found
-        if self.best_weights is None:
-            self.best_weights = {
-                'distance': 10.0,
-                'volunteer_count': 10.0,
-                'capacity_util': 0.0,
-                'history': 0.0,
-                'compact_routes': 0.0,
-                'clusters': 0.0
-            }
-            self.best_score = float('inf')
-            print("No good weights found, using default weights.")
-        
         with open(results_file, 'w') as f:
-            f.write("Weight Optimization Results\n")
-            f.write("=========================\n\n")
-            
-            f.write("Best Weights:\n")
+            f.write("Weight Optimization Results\n========================\n")
+            f.write("\nBest Weights:\n")
             for key, value in self.best_weights.items():
-                f.write(f"  {key}: {value:.4f}\n")
-            
-            f.write(f"\nBest Score: {self.best_score:.4f}\n\n")
-            
-            f.write("Optimization History:\n")
-            f.write("--------------------\n")
-            for i, result in enumerate(self.results_history):
-                f.write(f"\nTrial {i+1} (Iteration {result['iteration']}):\n")
-                f.write("  Weights:\n")
-                for key, value in result['weights'].items():
-                    f.write(f"    {key}: {value:.4f}\n")
-                f.write(f"  Score: {result['score']:.4f}\n")
-                f.write(f"  Percentage Changes: {result['pct_changes']}\n")
-        
+                f.write(f"  {key}: {value:.2f}\n")
+            f.write(f"\nBest Score: {self.best_score:.2f}\n")
+            f.write("\nHistory:\n--------\n")
+            for i, result in enumerate(self.results_history, 1):
+                f.write(f"Trial {i} (Iteration {result['iteration']}):\n")
+                f.write("  Weights: " + ", ".join(f"{k}: {v:.2f}" for k, v in result['weights'].items()) + "\n")
+                f.write(f"  Score: {result['score']:.2f}\n")
+                f.write(f"  Changes: {result['pct_changes']}\n\n")
         print(f"Results saved to {results_file}")
         
-        # Also create a plot of the optimization progress
-        self._plot_optimization_progress()
-    
-    def _plot_optimization_progress(self):
-        """Create a plot showing the optimization progress over iterations."""
+        # Plot progress
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         plot_file = os.path.join(self.output_dir, f"weight_optimization_plot_{timestamp}.png")
+        iterations = [r['iteration'] for r in self.results_history]
+        scores = [r['score'] for r in self.results_history if r['score'] < float('inf')]
+        if not scores:
+            print("No valid scores to plot")
+            return
         
-        # Extract data for plotting
-        iterations = [result['iteration'] for result in self.results_history]
-        scores = [result['score'] for result in self.results_history]
-        
-        # Find best score at each iteration
+        plt.figure(figsize=(10, 6))
+        plt.scatter(iterations, scores, alpha=0.5, label='Trials')
         best_scores = []
         current_best = float('inf')
-        
-        for i in range(1, max(iterations) + 1):
-            iteration_scores = [score for score, iter_num in zip(scores, iterations) if iter_num <= i]
-            if iteration_scores:
-                current_best = min(min(iteration_scores), current_best)
-            best_scores.append((i, current_best))
-        
-        # Create plot
-        plt.figure(figsize=(12, 8))
-        
-        # Plot all scores
-        plt.scatter(iterations, scores, alpha=0.5, label='All trials')
-        
-        # Plot best score progression
-        best_x, best_y = zip(*best_scores)
-        plt.plot(best_x, best_y, 'r-', linewidth=2, label='Best score')
-        
+        for i in range(max(iterations) + 1):
+            valid_scores = [s for s, it in zip(scores, iterations) if it <= i]
+            if valid_scores:
+                current_best = min(min(valid_scores), current_best)
+            best_scores.append(current_best)
+        plt.plot(range(max(iterations) + 1), best_scores, 'r-', label='Best Score')
         plt.title('Weight Optimization Progress')
         plt.xlabel('Iteration')
-        plt.ylabel('Score (lower is better)')
+        plt.ylabel('Score (Lower is Better)')
         plt.legend()
         plt.grid(True)
-        
-        # Save plot
         plt.savefig(plot_file)
-        print(f"Optimization progress plot saved to {plot_file}")
+        print(f"Plot saved to {plot_file}")
 
-
-def main(num_iterations=10, population_size=5, timeout=60):
+def main(num_iterations=10, population_size=5, timeout=60, disabled_weights=None):
     """
-    Main function to run the weight optimizer.
+    Run the weight optimizer with command-line arguments.
     
     Args:
-        num_iterations (int): Number of iterations to run.
-        population_size (int): Number of weight combinations to evaluate in each iteration.
-        timeout (int): Maximum time in seconds to allow for each evaluation.
+        num_iterations (int): Number of iterations.
+        population_size (int): Weight sets per iteration.
+        timeout (int): Max seconds per evaluation.
+        disabled_weights (set): Weights to disable (e.g., {'history', 'clusters'}).
     """
-    optimizer = WeightOptimizer()
+    admin_data = get_admin_assignments()
+    if not admin_data:
+        print("No admin assignments found")
+        return
+    
+    optimizer = WeightOptimizer(admin_data)
     best_weights, best_score, _ = optimizer.optimize(
         num_iterations=num_iterations,
         population_size=population_size,
-        timeout=timeout
+        timeout=timeout,
+        disabled_weights=disabled_weights
     )
-    
-    print("\nOptimization completed!")
-    print(f"Best weights: {best_weights}")
-    print(f"Best score: {best_score:.4f}")
-
+    print(f"\nBest Weights: {best_weights}")
+    print(f"Best Score: {best_score:.2f}")
 
 if __name__ == "__main__":
     import argparse
-    
-    parser = argparse.ArgumentParser(description='Weight Optimizer for Volunteer Assignment System')
-    parser.add_argument('--iterations', type=int, default=10, help='Number of iterations to run')
-    parser.add_argument('--population', type=int, default=5, help='Population size for each iteration')
-    parser.add_argument('--timeout', type=int, default=60, help='Timeout in seconds for each evaluation')
-    
+    parser = argparse.ArgumentParser(description="Optimize weights for volunteer assignment")
+    parser.add_argument('--iterations', type=int, default=10, help='Number of iterations')
+    parser.add_argument('--population', type=int, default=5, help='Population size')
+    parser.add_argument('--timeout', type=int, default=60, help='Timeout per evaluation (seconds)')
+    parser.add_argument('--disable', nargs='*', default=[], help='Weights to disable (e.g., history clusters)')
     args = parser.parse_args()
     
     main(
         num_iterations=args.iterations,
         population_size=args.population,
-        timeout=args.timeout
+        timeout=args.timeout,
+        disabled_weights=set(args.disable)
     )

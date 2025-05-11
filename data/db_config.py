@@ -175,7 +175,10 @@ class DatabaseHandler:
     
     def _create_engine_from_config(self):
         """Create a SQLAlchemy engine from configuration."""
+        # Create the connection URL
         db_url = f"mysql+pymysql://{self.config['username']}:{self.config['password']}@{self.config['host']}/{self.config['database']}"
+        
+        # Create the engine
         return create_engine(db_url)
     
     def create_tables(self):
