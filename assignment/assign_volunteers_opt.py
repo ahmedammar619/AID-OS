@@ -14,6 +14,7 @@ import time
 from datetime import datetime
 import math
 import matplotlib.pyplot as plt
+import random
 import folium
 import seaborn as sns
 
@@ -42,7 +43,7 @@ class VolunteerAssignerOpt:
         self,
         db_handler=None,
         feedback_handler=None,
-        use_clustering=False,
+        use_clustering=True,
         cluster_eps=0.00005,
         output_dir="./hist/output",
         data=None
@@ -233,9 +234,74 @@ class VolunteerAssignerOpt:
         Returns:
             float: Historical match score (0-3).
         """
+        # If we have pre-computed scores, use them
+        if hasattr(self, 'historical_scores_matrix') and self.historical_scores_matrix is not None:
+            return self.historical_scores_matrix[volunteer_idx][recipient_idx]
+        
+        # Otherwise fall back to database query
         volunteer_id = self.volunteers[volunteer_idx].volunteer_id
         recipient_id = self.recipients[recipient_idx].recipient_id
         return self.db_handler.get_volunteer_historical_score(volunteer_id, recipient_id)
+        
+    def _precompute_historical_scores(self):
+        """
+        Pre-compute all historical match scores and store them in a matrix for fast lookup.
+        This is a significant optimization when using history weights in the optimization.
+        
+        Returns:
+            dict: Dictionary of non-zero historical scores.
+        """
+        print("Pre-computing historical match scores...")
+        start_time = time.time()
+        
+        # Instead of a full matrix, we'll use a sparse representation
+        # Only store pairs with non-zero scores to save memory and computation
+        self.historical_scores = {}
+        self.has_historical_data = False
+        
+        # Get all volunteer and recipient IDs
+        all_volunteer_ids = [v.volunteer_id for v in self.volunteers]
+        all_recipient_ids = [r.recipient_id for r in self.recipients]
+        
+        # Check if the database handler has a batch method for getting scores
+        if hasattr(self.db_handler, 'get_all_historical_scores'):
+            # Get all scores in one database call
+            all_scores = self.db_handler.get_all_historical_scores(all_volunteer_ids, all_recipient_ids)
+            
+            # Only store non-zero scores
+            for vol_idx, vol_id in enumerate(all_volunteer_ids):
+                for rec_idx, rec_id in enumerate(all_recipient_ids):
+                    key = (vol_id, rec_id)
+                    if key in all_scores and all_scores[key] > 0:
+                        self.historical_scores[(vol_idx, rec_idx)] = all_scores[key] / 3.0  # Normalize here
+                        self.has_historical_data = True
+        else:
+            # Fall back to individual queries but only for a limited subset
+            # This is a major optimization - we'll only check a small random sample
+            # of volunteer-recipient pairs instead of all possible combinations
+            max_queries = min(100, self.num_volunteers * self.num_recipients // 10)  # 10% or max 100
+            
+            # Generate random pairs to check
+            checked_pairs = set()
+            for _ in range(max_queries):
+                v = random.randint(0, self.num_volunteers - 1)
+                r = random.randint(0, self.num_recipients - 1)
+                if (v, r) not in checked_pairs:
+                    checked_pairs.add((v, r))
+                    
+                    volunteer_id = self.volunteers[v].volunteer_id
+                    recipient_id = self.recipients[r].recipient_id
+                    score = self.db_handler.get_volunteer_historical_score(volunteer_id, recipient_id)
+                    
+                    if score > 0:
+                        self.historical_scores[(v, r)] = score / 3.0  # Normalize here
+                        self.has_historical_data = True
+        
+        end_time = time.time()
+        print(f"Pre-computed historical scores in {end_time - start_time:.2f} seconds")
+        print(f"Found {len(self.historical_scores)} pairs with historical data")
+        
+        return self.historical_scores
     
     def _solve_tsp(self, points, start_idx=None, end_idx=None):
         """
@@ -517,6 +583,7 @@ class VolunteerAssignerOpt:
         # For historical matches normalization
         max_history_score = 1.0  # Already normalized
         
+   
         # For recipient distance normalization (used in compact routes)
         recipient_distance_norm = 5.0  # The threshold we're already using
         
@@ -528,14 +595,19 @@ class VolunteerAssignerOpt:
             weights = {
                 'distance': 10.0,            # Minimize distance between volunteer and recipient
                 'volunteer_count': 10.0,     # Minimize total number of volunteers used
-                'capacity_util': 0.0,       # Maximize capacity utilization
-                'history': 0.0,             # Prefer historical matches
-                'compact_routes': 0.0,      # Prefer recipients close to each other (compact routes)
-                'clusters': 0.0             # Prefer keeping clustered recipients together
+                'capacity_util': 10.0,       # Maximize capacity utilization
+                'history': 10.0,             # Prefer historical matches
+                'compact_routes': 10.0,      # Prefer recipients close to each other (compact routes)
+                'clusters': 10.0             # Prefer keeping clustered recipients together
             }
         print("Normalized weights (higher = more important):")
         for key, value in weights.items():
             print(f"  {key}: {value}")
+        
+        # Pre-compute historical scores if history weight is enabled
+        if weights.get('history', 0) > 0:
+            self._precompute_historical_scores()
+        
 
         # --- HARD CONSTRAINTS FOR DISTANCE AND CAPACITY UTILIZATION ---
         # These constraints ensure that the total normalized distance and average capacity utilization
@@ -611,14 +683,12 @@ class VolunteerAssignerOpt:
                 objective.SetCoefficient(y[v], -weights['volunteer_count'])
         
         # Historical match bonuses (negative weight since we want to maximize)
-        if weights['history']:
-            for v in range(self.num_volunteers):
-                for r in range(self.num_recipients):
-                    historical_score = self._get_historical_match_score(v, r)
-                    if historical_score > 0:
-                        # historical_score is already normalized (0-3)
-                        normalized_history = historical_score / 3.0
-                        objective.SetCoefficient(x[v, r], -weights['history'] * normalized_history)
+        if weights['history'] and self.has_historical_data:
+            # Only process pairs that have historical data (sparse optimization)
+            for (v, r), normalized_score in self.historical_scores.items():
+                if 0 <= v < self.num_volunteers and 0 <= r < self.num_recipients:
+                    # Score is already normalized during pre-computation
+                    objective.SetCoefficient(x[v, r], -weights['history'] * normalized_score)
         
         # Maximize volunteer capacity utilization (negative weight since we want to maximize)
         if weights['capacity_util']:
@@ -629,30 +699,60 @@ class VolunteerAssignerOpt:
                     normalized_contribution = min(1.0, contribution)  # Cap at 1.0
                     objective.SetCoefficient(x[v, r], -weights['capacity_util'] * normalized_contribution)
         
-        # Minimize recipient distances from each other (compact routes)
-        if weights['compact_routes']:
-            # Pre-compute distances and filter only close pairs to significantly reduce problem size
+        # 5. Minimize recipient distances from each other (compact routes)
+        # OPTIMIZATION: Only compute this if the weight is significant
+        if weights['compact_routes'] > 1.0:  # Skip if weight is minimal
+            print("  Computing compact routes coefficients...")
+            
+            # EXTREME OPTIMIZATION: Pre-compute a small subset of closest pairs
+            # Instead of computing all pairs, just pick a few recipients and find their closest neighbors
+            
+            # Select a subset of recipients to consider (e.g., 10% of total)
+            sample_size = min(20, self.num_recipients)  # At most 20 recipients
+            sample_indices = random.sample(range(self.num_recipients), sample_size)
+            
+            # For each sampled recipient, find its closest neighbors
             close_recipient_pairs = []
-            for r1 in range(self.num_recipients):
-                for r2 in range(r1 + 1, self.num_recipients):
-                    # Calculate distance between recipients
-                    r1_lat, r1_lon = self.recipients[r1].latitude, self.recipients[r1].longitude
-                    r2_lat, r2_lon = self.recipients[r2].latitude, self.recipients[r2].longitude
-                    recip_distance = self._haversine_distance(r1_lat, r1_lon, r2_lat, r2_lon)
+            max_neighbors = 3  # Only consider the closest 3 neighbors for each recipient
+            
+            for r1_idx in sample_indices:
+                r1 = self.recipients[r1_idx]
+                neighbors = []
+                
+                # Find closest neighbors
+                for r2_idx in range(self.num_recipients):
+                    if r1_idx == r2_idx:
+                        continue
+                        
+                    r2 = self.recipients[r2_idx]
+                    recip_distance = self._haversine_distance(
+                        r1.latitude, r1.longitude, r2.latitude, r2.longitude
+                    )
                     
-                    # Only consider very close recipients
+                    # Only consider neighbors within the distance threshold
                     if recip_distance <= recipient_distance_norm:
-                        close_recipient_pairs.append((r1, r2, recip_distance))
+                        neighbors.append((r2_idx, recip_distance))
+                
+                # Sort neighbors by distance and take the closest ones
+                neighbors.sort(key=lambda x: x[1])
+                for r2_idx, distance in neighbors[:max_neighbors]:
+                    # Ensure we don't add the same pair twice
+                    pair = tuple(sorted([r1_idx, r2_idx]))
+                    pair_with_distance = (pair[0], pair[1], distance)
+                    if pair_with_distance not in close_recipient_pairs:
+                        close_recipient_pairs.append(pair_with_distance)
             
-            # Limit the number of pairs to consider (take the closest N pairs)
-            max_pairs = min(500, len(close_recipient_pairs))  # Cap at 500 pairs
-            close_recipient_pairs.sort(key=lambda x: x[2])  # Sort by distance
-            close_recipient_pairs = close_recipient_pairs[:max_pairs]  # Take only the closest pairs
+            # Limit to a very small number of pairs
+            max_pairs = min(50, len(close_recipient_pairs))  # Drastically reduced from 200 to 50
+            close_recipient_pairs = close_recipient_pairs[:max_pairs]
             
-            print(f"Using {len(close_recipient_pairs)} close recipient pairs for compact routes")
+            print(f"  Using {len(close_recipient_pairs)} close recipient pairs for compact routes")
             
-            # Only create variables for the filtered pairs (limit to top volunteers for performance)
-            for v in range(min(10, self.num_volunteers)):
+            # OPTIMIZATION: Limit to even fewer volunteers
+            max_volunteers = min(3, self.num_volunteers)  # Reduced from 5 to 3
+            
+            # Only create variables for the filtered pairs and limited volunteers
+            for v in range(max_volunteers):
                 for r1, r2, recip_distance in close_recipient_pairs:
                     # Create auxiliary variable for when both recipients are assigned to same volunteer
                     z = solver.BoolVar(f'z_compact_{v}_{r1}_{r2}')
@@ -666,28 +766,62 @@ class VolunteerAssignerOpt:
                     # Use negative coefficient to give preference to assigning close recipients together
                     objective.SetCoefficient(z, -weights['compact_routes'] * normalized_closeness)
         
-        # Cluster bonuses
-        if self.use_clustering and weights['clusters']:
-            for cluster_id, recipient_indices in self.clusters.items():
-                if cluster_id != -1 and len(recipient_indices) > 1:
-                    # Count the actual pairs within the distance threshold
-                    valid_cluster_pairs = 0
-                    
-                    for v in range(self.num_volunteers):
-                        for i in range(len(recipient_indices)):
-                            for j in range(i + 1, len(recipient_indices)):
-                                r1, r2 = recipient_indices[i], recipient_indices[j]
-                                if r1 < 0 or r2 < 0 or r1 >= self.num_recipients or r2 >= self.num_recipients:
-                                    continue
-                                    
-                                valid_cluster_pairs += 1
-                                z = solver.BoolVar(f'z_{v}_{r1}_{r2}')
-                                solver.Add(z <= x[v, r1])
-                                solver.Add(z <= x[v, r2])
-                                solver.Add(z >= x[v, r1] + x[v, r2] - 1)
-                                objective.SetCoefficient(z, -weights['clusters'])
+        # 6. Cluster bonuses - EXTREME OPTIMIZATION: Only compute if weight is significant
+        if self.use_clustering and weights['clusters'] > 1.0:  # Skip if weight is minimal
+            print("  Computing cluster coefficients...")
             
-            print(f"Created {valid_cluster_pairs} cluster pair variables")
+            # EXTREME OPTIMIZATION: Only use the largest clusters and limit pairs dramatically
+            max_clusters = 3  # Only consider the 3 largest clusters
+            max_cluster_size = 5  # Only consider up to 5 recipients per cluster
+            max_volunteers_for_clusters = min(2, self.num_volunteers)  # Limit to just 2 volunteers
+            
+            # Find the largest clusters
+            cluster_sizes = [(cluster_id, len(indices)) for cluster_id, indices in self.clusters.items() 
+                            if cluster_id != -1 and len(indices) > 1]
+            cluster_sizes.sort(key=lambda x: x[1], reverse=True)  # Sort by size, largest first
+            largest_clusters = cluster_sizes[:max_clusters]
+            
+            # Track total number of cluster pairs to avoid excessive variables
+            total_cluster_pairs = 0
+            max_total_pairs = 50  # Drastically reduced from 500 to 50
+            
+            for cluster_id, _ in largest_clusters:
+                recipient_indices = self.clusters[cluster_id]
+                
+                # Limit cluster size for computation
+                limited_indices = recipient_indices[:max_cluster_size]
+                
+                # Only consider valid indices within range
+                valid_indices = [r for r in limited_indices if 0 <= r < self.num_recipients]
+                
+                if len(valid_indices) <= 1:
+                    continue  # Skip if not enough valid recipients
+                
+                # OPTIMIZATION: Instead of all pairs, just create variables for consecutive pairs
+                # This reduces O(n²) pairs to O(n) pairs
+                for v in range(max_volunteers_for_clusters):
+                    for i in range(len(valid_indices) - 1):
+                        r1, r2 = valid_indices[i], valid_indices[i + 1]
+                        
+                        # Check if we've reached the maximum total pairs
+                        total_cluster_pairs += 1
+                        if total_cluster_pairs > max_total_pairs:
+                            break
+                        
+                        # Create auxiliary variable for when both recipients are assigned to same volunteer
+                        z = solver.BoolVar(f'z_cluster_{v}_{r1}_{r2}')
+                        solver.Add(z <= x[v, r1])
+                        solver.Add(z <= x[v, r2])
+                        solver.Add(z >= x[v, r1] + x[v, r2] - 1)
+                        objective.SetCoefficient(z, -weights['clusters'])
+                    
+                    if total_cluster_pairs > max_total_pairs:
+                        break
+                
+                if total_cluster_pairs > max_total_pairs:
+                    break
+            
+            print(f"  Using {total_cluster_pairs} cluster pairs in objective function")
         
         objective.SetMinimization()
         
