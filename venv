@@ -1,0 +1,10 @@
+<script>start("/Applications/XAMPP/xamppfiles/htdocs/AID-OS/.venv/");</script>
+<script>onHasParentDirectory();</script>
+<script>addRow("bin","bin",1,1056,"1.0 kB",1746806010,"5/9/25, 10:53:30 AM");</script>
+<script>addRow("etc","etc",1,96,"96 B",1745368747,"4/22/25, 7:39:07 PM");</script>
+<script>addRow("include","include",1,64,"64 B",1745368709,"4/22/25, 7:38:29 PM");</script>
+<script>addRow("lib","lib",1,96,"96 B",1745368709,"4/22/25, 7:38:29 PM");</script>
+<script>addRow("share","share",1,160,"160 B",1747179813,"5/13/25, 6:43:33 PM");</script>
+<script>addRow(".DS_Store",".DS_Store",0,6148,"6.0 kB",1747179813,"5/13/25, 6:43:33 PM");</script>
+<script>addRow("dist_metrics.pxd","dist_metrics.pxd",0,2626,"2.6 kB",1745368759,"4/22/25, 7:39:19 PM");</script>
+<script>addRow("pyvenv.cfg","pyvenv.cfg",0,117,"117 B",1745368709,"4/22/25, 7:38:29 PM");</script>
